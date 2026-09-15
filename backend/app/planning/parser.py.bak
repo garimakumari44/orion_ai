@@ -1,0 +1,343 @@
+from __future__ import annotations
+
+import json
+import logging
+import re
+from typing import Any
+
+from app.planning.intent import IntentClassifier
+from app.llm.manager import LLMManager
+from app.planning.models.planning_request import PlanningRequest
+
+logger = logging.getLogger(__name__)
+
+
+class PlanningParser:
+    """
+    Converts raw user input into PlanningRequest.
+
+    Responsibilities:
+    - Normalize query
+    - Detect intent
+    - Extract entities
+    - Extract constraints
+    - Attach metadata
+
+    Does NOT:
+    - Create tasks
+    - Build DAG
+    - Execute tools
+    """
+
+    def __init__(self, llm_service=None):
+
+        if llm_service is None:
+            from app.services.llm import LLMService
+            llm_service = LLMService()
+
+        self.llm = llm_service
+        self.intent_classifier = IntentClassifier(self.llm)
+
+
+    # =====================================================
+    # ENTRY POINT
+    # =====================================================
+
+    def parse(self, query: str) -> PlanningRequest:
+
+        normalized = self._normalize(query)
+
+        intent = self.intent_classifier.classify(
+            normalized
+        )
+
+        entities = self._extract_entities(
+            query
+        )
+
+        constraints = self._extract_constraints(
+            normalized
+        )
+
+        return PlanningRequest(
+            query=query,
+            intent=intent,
+            entities=entities,
+            constraints=constraints,
+            context={},
+            metadata={
+                "normalized_query": normalized,
+                "parser": "planning_parser_v3",
+                "entity_source": "llm_with_rule_fallback",
+                "domain": "equity_research",
+            },
+        )
+
+
+    # =====================================================
+    # ENTITY EXTRACTION
+    # =====================================================
+
+    def _extract_entities(
+        self,
+        query: str
+    ) -> list[str]:
+
+        prompt = f"""
+You are an entity extraction system for an equity research platform.
+
+Extract entities from the user's research request.
+
+Possible entities:
+- company names
+- stock tickers
+- industries
+- sectors
+- countries
+- investment themes
+
+Return ONLY valid JSON.
+
+Schema:
+
+{{
+    "company": null,
+    "ticker": null,
+    "industry": null,
+    "sector": null,
+    "entities": []
+}}
+
+User request:
+
+{query}
+"""
+
+        try:
+
+            response = self.llm.generate(prompt)
+
+            if not response:
+                raise ValueError(
+                    "Empty LLM response"
+                )
+
+
+            if isinstance(response, str):
+
+                entities = self._parse_json_response(
+                    response
+                )
+
+            else:
+                entities = response
+
+
+            extracted = []
+
+
+            if isinstance(entities, dict):
+
+                for value in entities.values():
+
+                    if isinstance(value, list):
+
+                        extracted.extend(
+                            str(v)
+                            for v in value
+                        )
+
+                    elif isinstance(value, str):
+
+                        extracted.append(
+                            value
+                        )
+
+
+            elif isinstance(entities, list):
+
+                extracted.extend(
+                    str(v)
+                    for v in entities
+                )
+
+
+            return list(
+                dict.fromkeys(
+                    extracted
+                )
+            )
+
+
+        except Exception:
+
+            logger.exception(
+                "LLM entity extraction failed"
+            )
+
+            return self._extract_entities_rule_based(
+                query
+            )
+
+
+    # =====================================================
+    # SAFE JSON PARSER
+    # =====================================================
+
+    def _parse_json_response(
+        self,
+        response: str
+    ) -> dict[str, Any]:
+
+        response = response.strip()
+
+
+        response = (
+            response
+            .replace("```json", "")
+            .replace("```", "")
+            .strip()
+        )
+
+
+        try:
+
+            return json.loads(
+                response
+            )
+
+
+        except json.JSONDecodeError:
+
+            match = re.search(
+                r"\{[\s\S]*\}",
+                response
+            )
+
+            if match:
+
+                return json.loads(
+                    match.group()
+                )
+
+
+        raise ValueError(
+            f"Invalid JSON response: {response[:300]}"
+        )
+
+
+    # =====================================================
+    # RULE BASED FALLBACK
+    # =====================================================
+
+    def _extract_entities_rule_based(
+        self,
+        text: str
+    ) -> list[str]:
+
+        entities = []
+
+        ignored = {
+            "Analyze",
+            "Compare",
+            "Give",
+            "Show",
+            "Latest",
+            "What",
+            "How",
+            "The",
+        }
+
+
+        for word in text.split():
+
+            cleaned = word.strip(
+                ",.!?;:()[]{}\"'"
+            )
+
+
+            if (
+                cleaned
+                and cleaned[0].isupper()
+                and cleaned not in ignored
+            ):
+
+                entities.append(
+                    cleaned
+                )
+
+
+        return list(
+            dict.fromkeys(
+                entities
+            )
+        )
+
+
+    # =====================================================
+    # NORMALIZATION
+    # =====================================================
+
+    def _normalize(
+        self,
+        text: str
+    ) -> str:
+
+        text = re.sub(
+            r"\s+",
+            " ",
+            text
+        )
+
+        return text.strip()
+
+
+    # =====================================================
+    # CONSTRAINT EXTRACTION
+    # =====================================================
+
+    def _extract_constraints(
+        self,
+        text: str
+    ) -> list[str]:
+
+        checks = {
+
+            "latest": "latest",
+            "today": "latest",
+
+            "quarterly": "quarterly",
+
+            "annual": "annual",
+
+            "historical": "historical",
+
+            "10-k": "sec_filings",
+
+            "10-q": "sec_filings",
+
+            "earnings": "earnings",
+
+            "valuation": "valuation",
+
+            "comparison": "comparison",
+
+            "macro": "macro",
+        }
+
+
+        lowered = text.lower()
+
+
+        constraints = [
+            value
+            for key, value in checks.items()
+            if key in lowered
+        ]
+
+
+        return list(
+            dict.fromkeys(
+                constraints
+            )
+        )

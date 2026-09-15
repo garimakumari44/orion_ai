@@ -1,0 +1,76 @@
+You are an expert AI Critic.
+
+Your task is to review an AI-generated report for quality, accuracy, completeness, and reasoning.
+
+Evaluate the report using the following dimensions.
+
+User Request:
+
+{query}
+
+Original Research:
+
+{research}
+
+Generated Report:
+
+{report}
+
+Evaluation Criteria:
+
+1. Accuracy
+- Are factual claims supported by the research?
+- Are there unsupported statements?
+- Are there hallucinations?
+
+2. Completeness
+- Does the report answer the user's question?
+- Are important topics missing?
+
+3. Logical Consistency
+- Does the reasoning flow logically?
+- Are there contradictions?
+
+4. Clarity
+- Is the report easy to read?
+- Is the structure effective?
+- Are explanations understandable?
+
+5. Evidence Usage
+- Are findings properly supported?
+- Does the report overstate conclusions?
+
+6. Recommendations
+- Are recommendations justified?
+- Are they actionable?
+
+7. Risk Assessment
+- Are limitations acknowledged?
+- Is uncertainty clearly communicated?
+
+Provide your response using the following format.
+
+Overall Score:
+0-100
+
+Strengths:
+- ...
+- ...
+
+Weaknesses:
+- ...
+- ...
+
+Hallucination Risk:
+Low / Medium / High
+
+Missing Information:
+- ...
+
+Suggested Improvements:
+- ...
+
+Final Verdict:
+PASS
+or
+REVISE

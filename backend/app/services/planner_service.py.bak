@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from typing import Optional
+
+from app.planning.parser import PlanningParser
+from app.planning.planner import Planner
+from app.planning.graph_builder import GraphBuilder
+from app.planning.validator import GraphValidator
+from app.planning.scheduler import Scheduler
+from app.planning.execution_plan_builder import ExecutionPlanBuilder
+
+from app.planning.models.execution_plan import ExecutionPlan
+
+from app.services.llm import LLMService
+
+
+class PlannerService:
+    """
+    Coordinates the complete planning pipeline.
+
+    Flow:
+
+        Raw Query
+            ↓
+        PlanningParser
+            ↓
+        PlanningRequest
+            ↓
+        Planner
+            ↓
+        GraphBuilder
+            ↓
+        Validator
+            ↓
+        Scheduler
+            ↓
+        ExecutionPlan
+    """
+
+    def __init__(
+        self,
+        llm_service: Optional[LLMService] = None,
+        parser: Optional[PlanningParser] = None,
+        planner: Optional[Planner] = None,
+        graph_builder: Optional[GraphBuilder] = None,
+        validator: Optional[GraphValidator] = None,
+        scheduler: Optional[Scheduler] = None,
+        execution_builder: Optional[ExecutionPlanBuilder] = None,
+    ):
+
+        # Use the provided LLM service or create one
+        if llm_service is None:
+            self.llm_service = LLMService()
+        else:
+            self.llm_service = llm_service
+
+        print("PlannerService LLM:", self.llm_service)
+
+        # Initialize parser with the shared LLM service
+        self.parser = parser or PlanningParser(self.llm_service)
+
+        # Initialize planner with the same LLM service
+        self.planner = planner or Planner(
+            llm_service=self.llm_service
+        )
+
+        # Other planning pipeline components
+        self.graph_builder = graph_builder or GraphBuilder()
+
+        self.validator = validator or GraphValidator()
+
+        self.scheduler = scheduler or Scheduler()
+
+        self.execution_builder = (
+    execution_builder or ExecutionPlanBuilder(self.llm_service)
+)
+
+    def create_plan(
+        self,
+        query: str,
+    ) -> ExecutionPlan:
+        """
+        Executes the complete planning pipeline starting
+        from the raw user query.
+        """
+
+        # Step 1: Parse the raw query
+        planning_request = self.parser.parse(query)
+
+        # Step 2: Generate logical tasks
+        tasks = self.planner.create_plan(planning_request)
+
+        # Step 3: Build dependency graph
+        graph = self.graph_builder.build(tasks)
+
+        # Step 4: Validate graph
+        self.validator.validate(graph)
+
+        # Step 5: Schedule execution
+        execution_order = self.scheduler.schedule(graph)
+
+        # Step 6: Build execution plan
+        execution_plan = self.execution_builder.build(
+    graph=graph,
+    execution_order=execution_order,
+)
+
+        return execution_plan

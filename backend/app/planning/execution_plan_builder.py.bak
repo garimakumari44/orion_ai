@@ -1,0 +1,979 @@
+"""
+app/planning/execution_plan_builder.py
+
+Execution Plan Builder.
+
+Builds the final ExecutionPlan from a TaskGraph.
+
+Responsibilities:
+- Validate TaskGraph
+- Validate agent assignment
+- Enrich tasks with execution metadata
+- Infer execution capabilities when missing
+- Build task parameters
+- Configure memory policy
+- Calculate priority
+- Estimate cost
+- Generate an optional execution-plan explanation
+
+Does NOT:
+- Create tasks
+- Assign agents
+- Execute tools
+- Execute agents
+- Retrieve memory
+- Schedule tasks
+- Call external services during normal plan construction
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, List, Optional
+
+from app.services.llm import LLMService
+
+from .models.execution_plan import ExecutionPlan
+from .models.task_graph import TaskGraph
+
+
+logger = logging.getLogger(__name__)
+
+
+class ExecutionPlanBuilder:
+    """
+    Builds the final ExecutionPlan.
+
+    Agent assignment must already exist on every task
+    before this builder is called.
+
+    Architecture:
+
+        Planner
+            |
+            v
+        TaskGraph
+            |
+            v
+        Scheduler
+            |
+            v
+        ExecutionPlanBuilder
+            |
+            +-- validate
+            +-- enrich
+            +-- configure memory
+            +-- calculate priority/cost
+            |
+            v
+        ExecutionPlan
+    """
+
+    def __init__(
+        self,
+        llm_service: Optional[LLMService] = None,
+    ) -> None:
+        self.llm_service = llm_service
+
+    # ==========================================================
+    # MAIN BUILDER
+    # ==========================================================
+
+    def build(
+        self,
+        graph: TaskGraph,
+        execution_order: List[str],
+        metadata: Optional[Dict[str, Any]] = None,
+        include_explanation: bool = False,
+    ) -> ExecutionPlan:
+        """
+        Build the final ExecutionPlan from a TaskGraph.
+
+        Validation happens before enrichment so that an invalid
+        graph never becomes an executable plan.
+        """
+
+        metadata = dict(metadata or {})
+
+        # ------------------------------------------------------
+        # Validate graph
+        # ------------------------------------------------------
+
+        self._validate_graph(graph)
+
+        # ------------------------------------------------------
+        # Validate execution order
+        # ------------------------------------------------------
+
+        self._validate_execution_order(
+            graph=graph,
+            execution_order=execution_order,
+        )
+
+        # ------------------------------------------------------
+        # Configure memory strategy
+        # ------------------------------------------------------
+
+        metadata["memory"] = self._build_memory_config(
+            graph
+        )
+
+        # ------------------------------------------------------
+        # Enrich tasks
+        # ------------------------------------------------------
+
+        self._populate_execution_details(graph)
+
+        # ------------------------------------------------------
+        # Find graph boundaries
+        # ------------------------------------------------------
+
+        root_tasks = self._find_root_tasks(graph)
+        leaf_tasks = self._find_leaf_tasks(graph)
+
+        # ------------------------------------------------------
+        # Optional explanation
+        # ------------------------------------------------------
+
+        if include_explanation and self.llm_service:
+            metadata["explanation"] = (
+                self._generate_explanation(
+                    graph,
+                    execution_order,
+                )
+            )
+
+        # ------------------------------------------------------
+        # Build final ExecutionPlan
+        # ------------------------------------------------------
+
+        return ExecutionPlan(
+            graph=graph,
+            execution_order=execution_order,
+            root_tasks=root_tasks,
+            leaf_tasks=leaf_tasks,
+            metadata=metadata,
+        )
+
+    # ==========================================================
+    # GRAPH VALIDATION
+    # ==========================================================
+
+    def _validate_graph(
+        self,
+        graph: TaskGraph,
+    ) -> None:
+        """
+        Validate the TaskGraph before creating an ExecutionPlan.
+
+        Every task must have:
+
+        - task_type
+        - agent_name
+
+        Agent assignment is intentionally validated here,
+        but never created or modified here.
+        """
+
+        if graph is None:
+            raise ValueError(
+                "Cannot create execution plan from None graph"
+            )
+
+        if not graph.tasks:
+            raise ValueError(
+                "Cannot create execution plan from empty graph"
+            )
+
+        for task_id, task in graph.tasks.items():
+
+            # --------------------------------------------------
+            # Validate task object
+            # --------------------------------------------------
+
+            if task is None:
+                raise ValueError(
+                    f"Task {task_id} is None"
+                )
+
+            # --------------------------------------------------
+            # Validate task type
+            # --------------------------------------------------
+
+            task_type = getattr(
+                task,
+                "task_type",
+                None,
+            )
+
+            if not task_type:
+                raise ValueError(
+                    f"Task {task_id} missing task_type"
+                )
+
+            # --------------------------------------------------
+            # Validate agent assignment
+            # --------------------------------------------------
+
+            agent_name = getattr(
+                task,
+                "agent_name",
+                None,
+            )
+
+            if not agent_name:
+                raise ValueError(
+                    f"Task {task_id} "
+                    f"('{getattr(task, 'title', 'unknown')}') "
+                    "missing agent_name"
+                )
+
+            if not isinstance(agent_name, str):
+                raise ValueError(
+                    f"Task {task_id} agent_name must be a string"
+                )
+
+            if not agent_name.strip():
+                raise ValueError(
+                    f"Task {task_id} agent_name cannot be empty"
+                )
+
+            # --------------------------------------------------
+            # Validate dependencies
+            # --------------------------------------------------
+
+            dependencies = getattr(
+                task,
+                "dependencies",
+                [],
+            )
+
+            if dependencies is None:
+                continue
+
+            if not isinstance(
+                dependencies,
+                list,
+            ):
+                raise ValueError(
+                    f"Task {task_id} dependencies "
+                    "must be a list"
+                )
+
+            for dependency_id in dependencies:
+
+                if dependency_id not in graph.tasks:
+                    raise ValueError(
+                        f"Task {task_id} depends on "
+                        f"unknown task {dependency_id}"
+                    )
+
+    # ==========================================================
+    # EXECUTION ORDER VALIDATION
+    # ==========================================================
+
+    def _validate_execution_order(
+        self,
+        graph: TaskGraph,
+        execution_order: List[str],
+    ) -> None:
+        """
+        Validate that execution_order contains valid task IDs.
+
+        The Scheduler determines the order.
+
+        This method only validates the resulting order.
+        """
+
+        if execution_order is None:
+            raise ValueError(
+                "Execution order cannot be None"
+            )
+
+        if not isinstance(
+            execution_order,
+            list,
+        ):
+            raise ValueError(
+                "Execution order must be a list"
+            )
+
+        graph_task_ids = set(
+            graph.tasks.keys()
+        )
+
+        execution_task_ids = set(
+            execution_order
+        )
+
+        # ------------------------------------------------------
+        # Unknown tasks
+        # ------------------------------------------------------
+
+        unknown_tasks = (
+            execution_task_ids
+            - graph_task_ids
+        )
+
+        if unknown_tasks:
+            raise ValueError(
+                "Execution order contains "
+                f"unknown task IDs: {unknown_tasks}"
+            )
+
+        # ------------------------------------------------------
+        # Missing tasks
+        # ------------------------------------------------------
+
+        missing_tasks = (
+            graph_task_ids
+            - execution_task_ids
+        )
+
+        if missing_tasks:
+            raise ValueError(
+                "Execution order is missing "
+                f"task IDs: {missing_tasks}"
+            )
+
+        # ------------------------------------------------------
+        # Duplicate tasks
+        # ------------------------------------------------------
+
+        if len(execution_order) != len(
+            execution_task_ids
+        ):
+            raise ValueError(
+                "Execution order contains duplicate task IDs"
+            )
+
+    # ==========================================================
+    # MEMORY CONFIGURATION
+    # ==========================================================
+
+    def _build_memory_config(
+        self,
+        graph: TaskGraph,
+    ) -> Dict[str, Any]:
+        """
+        Build memory configuration based on task types.
+
+        This is descriptive metadata only.
+
+        The builder does not retrieve memory and does not
+        create a memory agent.
+        """
+
+        task_types = {
+            self._task_type_value(task)
+            for task in graph.tasks.values()
+        }
+
+        research_tasks = {
+            "research",
+            "search",
+            "web_search",
+            "dense_retrieval",
+            "hybrid_retrieval",
+            "graph_retrieval",
+            "company_lookup",
+            "financial_data",
+            "market_data",
+            "fundamentals",
+            "sec_filing",
+            "news_search",
+        }
+
+        writing_tasks = {
+            "summarize",
+            "generate_report",
+            "write_report",
+        }
+
+        include_research = bool(
+            task_types & research_tasks
+        )
+
+        include_preferences = bool(
+            task_types & writing_tasks
+        )
+
+        return {
+            "retrieve": True,
+            "store": True,
+            "top_k": 8,
+            "ranking": "hybrid",
+            "context_builder": True,
+            "stores": {
+                "working": True,
+                "episodic": include_research,
+                "semantic": include_research,
+                "procedural": False,
+                "research": include_research,
+                "preferences": include_preferences,
+            },
+        }
+
+    # ==========================================================
+    # TASK ENRICHMENT
+    # ==========================================================
+
+    def _populate_execution_details(
+        self,
+        graph: TaskGraph,
+    ) -> None:
+        """
+        Populate execution metadata for every task.
+
+        Planner-owned fields are preserved.
+
+        The builder may infer a capability only when the
+        planner did not provide one.
+
+        Agent assignment is NEVER created or modified here.
+        """
+
+        for task in graph.tasks.values():
+
+            # --------------------------------------------------
+            # Capability
+            # --------------------------------------------------
+
+            existing_capability = getattr(
+                task,
+                "capability",
+                None,
+            )
+
+            if not existing_capability:
+                task.capability = (
+                    self._infer_capability(task)
+                )
+
+            # --------------------------------------------------
+            # Parameters
+            # --------------------------------------------------
+
+            task.parameters = (
+                self._build_parameters(task)
+            )
+
+            # --------------------------------------------------
+            # Normalize dependencies
+            # --------------------------------------------------
+
+            if hasattr(
+                task,
+                "dependencies",
+            ):
+                task.dependencies = list(
+                    getattr(
+                        task,
+                        "dependencies",
+                        [],
+                    )
+                    or []
+                )
+
+            # --------------------------------------------------
+            # Priority
+            # --------------------------------------------------
+
+            task.priority = (
+                self._infer_priority(task)
+            )
+
+            # --------------------------------------------------
+            # Cost
+            # --------------------------------------------------
+
+            task.cost = (
+                self._estimate_cost(task)
+            )
+
+    # ==========================================================
+    # TASK TYPE HELPER
+    # ==========================================================
+
+    @staticmethod
+    def _task_type_value(
+        task,
+    ) -> str:
+        """
+        Normalize task_type to a string.
+
+        Supports:
+
+            "research"
+
+        and:
+
+            TaskType.RESEARCH
+        """
+
+        task_type = getattr(
+            task,
+            "task_type",
+            "",
+        )
+
+        if hasattr(
+            task_type,
+            "value",
+        ):
+            return str(
+                task_type.value
+            )
+
+        return str(
+            task_type
+        )
+
+    # ==========================================================
+    # CAPABILITY MAPPING
+    # ==========================================================
+
+    def _infer_capability(
+        self,
+        task,
+    ) -> str:
+        """
+        Infer capability only when the planner did not
+        provide one.
+
+        IMPORTANT:
+
+            capability != agent_name
+
+        Example:
+
+            task_type:
+                company_lookup
+
+            capability:
+                knowledge.company.lookup
+
+            agent_name:
+                company_agent
+        """
+
+        mapping = {
+
+            # --------------------------------------------------
+            # Search
+            # --------------------------------------------------
+
+            "search":
+                "search.retrieve",
+
+            "web_search":
+                "search.web",
+
+            "github_search":
+                "github.search",
+
+            "news_search":
+                "news.search",
+
+            # --------------------------------------------------
+            # Knowledge
+            # --------------------------------------------------
+
+            "company_lookup":
+                "knowledge.company.lookup",
+
+            "graph_retrieval":
+                "knowledge.graph.query",
+
+            # --------------------------------------------------
+            # Finance
+            # --------------------------------------------------
+
+            "financial_data":
+                "finance.market.data",
+
+            "market_data":
+                "finance.market.data",
+
+            "fundamentals":
+                "finance.fundamentals",
+
+            "sec_filing":
+                "finance.sec.filing",
+
+            # --------------------------------------------------
+            # Research
+            # --------------------------------------------------
+
+            "research":
+                "research.retrieve",
+
+            # --------------------------------------------------
+            # LLM
+            # --------------------------------------------------
+
+            "summarize":
+                "llm.summarize",
+
+            "analyze":
+                "llm.analyze",
+
+            "compare":
+                "llm.compare",
+
+            "classify":
+                "llm.classify",
+
+            # --------------------------------------------------
+            # Retrieval
+            # --------------------------------------------------
+
+            "dense_retrieval":
+                "retrieval.dense",
+
+            "sparse_retrieval":
+                "retrieval.sparse",
+
+            "hybrid_retrieval":
+                "retrieval.hybrid",
+
+            "rerank":
+                "retrieval.rerank",
+
+            "compress_context":
+                "retrieval.compress",
+
+            # --------------------------------------------------
+            # Memory
+            # --------------------------------------------------
+
+            "memory_store":
+                "memory.store",
+
+            "memory_extract":
+                "memory.extract",
+
+            "memory_consolidate":
+                "memory.consolidate",
+
+            # --------------------------------------------------
+            # Reports
+            # --------------------------------------------------
+
+            "generate_report":
+                "report.generate",
+
+            "write_report":
+                "report.generate",
+        }
+
+        task_type = (
+            self._task_type_value(task)
+        )
+
+        return mapping.get(
+            task_type,
+            "general.execute",
+        )
+
+    # ==========================================================
+    # PARAMETERS
+    # ==========================================================
+
+    def _build_parameters(
+        self,
+        task,
+    ) -> Dict[str, Any]:
+        """
+        Build execution parameters.
+
+        The canonical Task already contains a `parameters`
+        dictionary, so preserve planner-generated parameters.
+
+        Additional supported task attributes are also included
+        when they exist.
+        """
+
+        existing_parameters = getattr(
+            task,
+            "parameters",
+            None,
+        )
+
+        parameters: Dict[str, Any] = {}
+
+        if isinstance(
+            existing_parameters,
+            dict,
+        ):
+            parameters.update(
+                existing_parameters
+            )
+
+        allowed_fields = [
+
+            # --------------------------------------------------
+            # General
+            # --------------------------------------------------
+
+            "query",
+            "company",
+            "repository",
+            "url",
+            "topic",
+            "language",
+            "time_range",
+            "filters",
+            "limit",
+
+            # --------------------------------------------------
+            # Retrieval
+            # --------------------------------------------------
+
+            "top_k",
+            "retrieval_mode",
+            "collection",
+            "namespace",
+            "embedding_model",
+            "reranker",
+            "include_memory",
+            "memory_types",
+            "include_graph",
+            "include_web",
+            "score_threshold",
+        ]
+
+        for field in allowed_fields:
+
+            value = getattr(
+                task,
+                field,
+                None,
+            )
+
+            if value is not None:
+                parameters[field] = value
+
+        # ------------------------------------------------------
+        # Include task metadata
+        # ------------------------------------------------------
+
+        task_metadata = getattr(
+            task,
+            "metadata",
+            None,
+        )
+
+        if isinstance(
+            task_metadata,
+            dict,
+        ):
+            parameters.update(
+                task_metadata
+            )
+
+        return parameters
+
+    # ==========================================================
+    # PRIORITY
+    # ==========================================================
+
+    def _infer_priority(
+        self,
+        task,
+    ) -> str:
+        """
+        Determine task execution priority.
+
+        Planner priority is intentionally not trusted here;
+        execution priority is normalized from task type.
+        """
+
+        high_priority = {
+            "market_data",
+            "financial_data",
+            "news_search",
+            "alert",
+            "generate_report",
+            "reason",
+            "validate",
+        }
+
+        task_type = (
+            self._task_type_value(task)
+        )
+
+        if task_type in high_priority:
+            return "high"
+
+        return "medium"
+
+    # ==========================================================
+    # COST
+    # ==========================================================
+
+    def _estimate_cost(
+        self,
+        task,
+    ) -> str:
+        """
+        Estimate relative execution cost.
+        """
+
+        expensive_tasks = {
+            "web_search",
+            "dense_retrieval",
+            "generate_report",
+            "write_report",
+            "analyze",
+            "reason",
+        }
+
+        task_type = (
+            self._task_type_value(task)
+        )
+
+        if task_type in expensive_tasks:
+            return "high"
+
+        return "low"
+
+    # ==========================================================
+    # GRAPH HELPERS
+    # ==========================================================
+
+    def _find_root_tasks(
+        self,
+        graph: TaskGraph,
+    ) -> List[str]:
+        """
+        Find tasks that have no dependencies.
+        """
+
+        return [
+            task_id
+            for task_id in graph.tasks
+            if not graph.dependencies.get(
+                task_id
+            )
+        ]
+
+    def _find_leaf_tasks(
+        self,
+        graph: TaskGraph,
+    ) -> List[str]:
+        """
+        Find tasks that have no children.
+        """
+
+        return [
+            task_id
+            for task_id in graph.tasks
+            if not graph.children.get(
+                task_id
+            )
+        ]
+
+    # ==========================================================
+    # EXPLANATION
+    # ==========================================================
+
+    def _generate_explanation(
+        self,
+        graph: TaskGraph,
+        execution_order: List[str],
+    ) -> str:
+        """
+        Generate a concise human-readable explanation
+        of the execution plan.
+        """
+
+        tasks = []
+
+        for task_id in execution_order:
+
+            task = graph.tasks.get(
+                task_id
+            )
+
+            if task is None:
+                continue
+
+            tasks.append(
+                {
+                    "name": getattr(
+                        task,
+                        "name",
+                        getattr(
+                            task,
+                            "title",
+                            "unknown",
+                        ),
+                    ),
+                    "description": getattr(
+                        task,
+                        "description",
+                        "",
+                    ),
+                    "task_type": (
+                        self._task_type_value(task)
+                    ),
+                    "capability": getattr(
+                        task,
+                        "capability",
+                        None,
+                    ),
+                    "agent_name": getattr(
+                        task,
+                        "agent_name",
+                        None,
+                    ),
+                    "dependencies": getattr(
+                        task,
+                        "dependencies",
+                        [],
+                    ),
+                }
+            )
+
+        prompt = f"""
+Explain this AI execution plan.
+
+Tasks:
+{tasks}
+
+Execution order:
+{execution_order}
+
+Rules:
+- Explain the reasoning flow.
+- Explain the task dependencies.
+- Explain the role of the assigned agents.
+- Explain capabilities where useful.
+- Keep the explanation concise.
+- Do not mention internal Python code.
+"""
+
+        try:
+            result = self.llm_service.generate(
+                prompt
+            )
+
+            if result is None:
+                return (
+                    "Execution plan generated successfully."
+                )
+
+            return str(result)
+
+        except Exception as exc:
+            logger.warning(
+                "Failed to generate execution-plan "
+                "explanation: %s",
+                exc,
+            )
+
+            return (
+                "Execution plan generated successfully. "
+                "Detailed explanation was unavailable."
+            )
