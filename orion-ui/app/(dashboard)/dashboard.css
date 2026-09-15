@@ -1,0 +1,160 @@
+@import "tailwindcss";
+
+/* ==========================================================
+   Dashboard Theme
+========================================================== */
+
+@theme {
+  --color-bg-surface: #0d0d0d;
+  --color-bg-hover: #171717;
+  --color-bg-elevated: #111111;
+
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #d4d4d8;
+  --color-text-muted: #a1a1aa;
+  --color-text-faint: #71717a;
+
+  --color-border: #262626;
+  --color-border-hover: #404040;
+  --color-border-subtle: #1f1f1f;
+
+  --color-accent: #3b82f6;
+  --color-accent-hover: #2563eb;
+}
+
+/* ==========================================================
+   Base
+========================================================== */
+
+@layer base {
+  * {
+    border-color: #1f1f1f;
+    box-sizing: border-box;
+  }
+
+  html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  scroll-behavior: smooth;
+}
+
+body {
+  background: #000;
+  color: #fff;
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+  ::selection {
+    background: rgba(59, 130, 246, 0.3);
+    color: white;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #2a2a2a;
+    border-radius: 999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3a3a3a;
+  }
+}
+
+/* ==========================================================
+   Components
+========================================================== */
+
+@layer components {
+  .dashboard-layout {
+    display: flex;
+    height: 100vh;
+    width: 100%;
+    background: #000;
+    color: #fff;
+    overflow: hidden;
+  }
+
+  .dashboard-sidebar {
+    width: 280px;
+    flex-shrink: 0;
+    border-right: 1px solid #1f1f1f;
+    background: #0d0d0d;
+  }
+
+  .dashboard-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .dashboard-header {
+    height: 64px;
+    border-bottom: 1px solid #1f1f1f;
+    background: #0d0d0d;
+  }
+
+  .dashboard-content {
+    flex: 1;
+    overflow: auto;
+    background: #000;
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      #0d0d0d 25%,
+      #1a1a1a 50%,
+      #0d0d0d 75%
+    );
+    background-size: 1000px 100%;
+    animation: shimmer 1.5s linear infinite;
+  }
+}
+
+/* ==========================================================
+   Utilities
+========================================================== */
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* ==========================================================
+   Animations
+========================================================== */
+
+@keyframes shimmer {
+  from {
+    background-position: -1000px 0;
+  }
+
+  to {
+    background-position: 1000px 0;
+  }
+}
