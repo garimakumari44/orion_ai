@@ -1,7 +1,7 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { FileText, ExternalLink, Shield } from 'lucide-react';
 import { cn, ConfidenceIndicator, Divider } from '../../components/ui';
-import type { WorkspaceEvidence } from '../type';
+import type { WorkspaceEvidence } from "@/types";
 
 interface EvidenceTabProps {
   evidence: WorkspaceEvidence[];
@@ -24,7 +24,7 @@ export function EvidenceTab({ evidence }: EvidenceTabProps) {
         {categories.map((cat) => (
           <button
             key={cat}
-            onClick={() => setFilter(cat)}
+            onClick={() => cat && setFilter(cat)}
             className={cn(
               'px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap transition-colors',
               filter === cat
@@ -51,9 +51,9 @@ export function EvidenceTab({ evidence }: EvidenceTabProps) {
                 <p className="text-sm text-text-primary leading-relaxed mb-2.5">{e.statement}</p>
                 <div className="flex items-center gap-3 text-xs">
                   <span className="text-text-muted">{e.source}</span>
-                  <span className="text-text-faint">·</span>
+                  <span className="text-text-faint">Â·</span>
                   <span className="font-mono text-text-faint">{e.docType}</span>
-                  <span className="text-text-faint">·</span>
+                  <span className="text-text-faint">Â·</span>
                   <span className="font-mono text-text-faint">{e.date}</span>
                 </div>
                 <div className="mt-2 px-3 py-2 bg-bg-elevated border border-border-subtle rounded text-xs text-text-muted italic">
@@ -96,3 +96,5 @@ export function EvidenceTab({ evidence }: EvidenceTabProps) {
     </div>
   );
 }
+
+

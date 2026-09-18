@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   useCallback,
@@ -23,6 +23,7 @@ import type {
   ApiResearchType,
   StartResearchRequest,
 } from "@/types";
+import type { ResearchResult as UiResearchResult } from "@/types/research";
 
 // ============================================================
 // Wizard Steps
@@ -62,6 +63,7 @@ const steps: {
 
 interface ResearchWizardProps {
   onExit: () => void;
+  onCreated?: (researchId: string | number) => void;
 }
 
 // ============================================================
@@ -208,7 +210,7 @@ export function ResearchWizard({
     error: resultsError,
   } = useResearchResults(
     researchId,
-    status?.progress,
+    status?.progress ?? undefined,
   );
 
   // ==========================================================
@@ -382,7 +384,7 @@ export function ResearchWizard({
 
         const payload: StartResearchRequest = {
           company_id:
-            config.company?.id ?? null,
+            config.company?.id ?? undefined,
 
           research_type:
             researchType,
@@ -452,7 +454,16 @@ export function ResearchWizard({
     return (
       <ResearchWorkspace
         researchId={researchId}
-        data={data}
+      data={
+        data
+          ? ({
+              ...data,
+              id: data.id == null ? "" : String(data.id),
+              researchId:
+                data.researchId == null ? null : String(data.researchId),
+            } as UiResearchResult)
+          : null
+      }
         loading={loading}
         progress={
           status?.progress ?? 0
@@ -462,9 +473,10 @@ export function ResearchWizard({
           "queued"
         }
         currentStage={
-          status?.current_stage ??
-          "Planning"
-        }
+        typeof status?.current_stage === "string"
+          ? status.current_stage
+          : "Planning"
+      }
         stages={[]}
         companyName={companyName}
         createdAt={createdAt}
@@ -509,7 +521,7 @@ export function ResearchWizard({
                 >
                   <span>
                     {past
-                      ? "✓"
+                      ? "âœ“"
                       : index + 1}
                   </span>
 
@@ -640,4 +652,15 @@ export function ResearchWizard({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
 

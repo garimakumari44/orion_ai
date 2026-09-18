@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   useState,
@@ -1180,7 +1180,7 @@ export function ResearchWorkspace({
                   </div>
 
                   <span className="text-text-faint">
-                    ·
+                    Â·
                   </span>
 
                   <span className="text-xs text-text-muted">
@@ -1194,7 +1194,7 @@ export function ResearchWorkspace({
                   {createdAt && (
                     <>
                       <span className="text-text-faint">
-                        ·
+                        Â·
                       </span>
 
                       <span className="text-xs text-text-faint">
@@ -1209,7 +1209,7 @@ export function ResearchWorkspace({
                   {currentStage && (
                     <>
                       <span className="text-text-faint">
-                        ·
+                        Â·
                       </span>
 
                       <span className="text-xs text-text-faint">
@@ -1559,3 +1559,4 @@ export function ResearchWorkspace({
 }
 
 export default ResearchWorkspace;
+

@@ -18,6 +18,7 @@ Divider,
 import reportsApi from "@/lib/api/reportsApi";
 
 import type { SavedReport } from "@/types/report";
+import { normalizeRecommendation } from "@/models/company";
 
 interface ReportsPageProps {
 onSelectCompany: (id: string) => void;
@@ -423,10 +424,8 @@ return ( <div className="h-full overflow-y-auto"> <div className="max-w-4xl mx-a
                   {/* Recommendation */}
                   {report.recommendation && (
                     <RecommendationBadge
-                      value={
-                        report.recommendation
-                      }
-                    />
+  value={normalizeRecommendation(report.recommendation)}
+/>
                   )}
 
                   {/* Download */}

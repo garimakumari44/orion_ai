@@ -1,8 +1,11 @@
-import { Sparkles, Check, Loader, Shield, FileStack, BookOpen, Activity } from 'lucide-react';
+﻿import { Sparkles, Check, Loader, Shield, FileStack, BookOpen, Activity } from 'lucide-react';
 import { cn, ProgressBar, ConfidenceIndicator } from '../../components/ui';
-import type { WorkspaceData } from '../type'
+import type { WorkspaceData } from "@/types"
 
 interface AnalystTabProps {
+  actions?: import("@/types/workspace").AgentAction[];
+  stages?: import("@/types/workspace").ResearchStage[];
+  insights?: import("@/types/research").ResearchInsight[];
   agent: WorkspaceData['agent'];
 }
 
@@ -15,7 +18,7 @@ export function AnalystTab({ agent }: AnalystTabProps) {
         </div>
         <div>
           <h2 className="text-sm font-medium text-text-primary">AI Analyst</h2>
-          <p className="text-xs text-text-muted">Your research partner — working behind the scenes</p>
+          <p className="text-xs text-text-muted">Your research partner â€” working behind the scenes</p>
         </div>
       </div>
 
@@ -96,3 +99,7 @@ export function AnalystTab({ agent }: AnalystTabProps) {
     </div>
   );
 }
+
+
+
+

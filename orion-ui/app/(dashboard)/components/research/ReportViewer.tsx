@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   Check,
@@ -165,18 +165,18 @@ function normalizePdfText(value: string): string {
   return value
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[–—]/g, "-")
-    .replace(/…/g, "...")
-    .replace(/•/g, "*")
-    .replace(/→/g, "->")
-    .replace(/←/g, "<-")
-    .replace(/≥/g, ">=")
-    .replace(/≤/g, "<=")
-    .replace(/≠/g, "!=")
-    .replace(/×/g, "x")
-    .replace(/÷/g, "/")
+    .replace(/[â€œâ€]/g, '"')
+    .replace(/[â€˜â€™]/g, "'")
+    .replace(/[â€“â€”]/g, "-")
+    .replace(/â€¦/g, "...")
+    .replace(/â€¢/g, "*")
+    .replace(/â†’/g, "->")
+    .replace(/â†/g, "<-")
+    .replace(/â‰¥/g, ">=")
+    .replace(/â‰¤/g, "<=")
+    .replace(/â‰ /g, "!=")
+    .replace(/Ã—/g, "x")
+    .replace(/Ã·/g, "/")
     .replace(/\u00A0/g, " ")
     .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "");
 }
@@ -228,13 +228,19 @@ function cleanBullet(line: string) {
   );
 }
 
-function cleanNumberedList(line: string) {
+function cleanNumberedList(line: string): {
+  number: string;
+  text: string;
+} {
   const match = line.match(
     /^\s*(\d+)[.)]\s+(.*)$/,
   );
 
   if (!match) {
-    return stripMarkdown(line);
+    return {
+      number: "",
+      text: stripMarkdown(line),
+    };
   }
 
   return {
@@ -2124,3 +2130,4 @@ export function ReportViewer({
     </div>
   );
 }
+

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { Upload, FileText, Search, Check, Loader, AlertCircle, Table, FileText as DocIcon } from 'lucide-react';
 import { cn } from '../../components/ui';
-import type { KnowledgeDoc } from '../type';
+import type { KnowledgeDoc } from "@/types";
 
 interface KnowledgeTabProps {
   documents: KnowledgeDoc[];
@@ -22,7 +22,7 @@ function statusLabel(status: KnowledgeDoc['status']) {
 export function KnowledgeTab({ documents }: KnowledgeTabProps) {
   const [query, setQuery] = useState('');
   const filtered = documents.filter(
-    (d) => d.name.toLowerCase().includes(query.toLowerCase()) || d.type.toLowerCase().includes(query.toLowerCase()),
+    (d) => d.name.toLowerCase().includes(query.toLowerCase()) || (d.type ?? "").toLowerCase().includes(query.toLowerCase()),
   );
 
   return (
@@ -63,9 +63,9 @@ export function KnowledgeTab({ documents }: KnowledgeTabProps) {
                 </div>
                 <div className="flex items-center gap-3 text-xs">
                   <span className="text-text-muted">{doc.type}</span>
-                  <span className="text-text-faint">·</span>
+                  <span className="text-text-faint">Â·</span>
                   <span className="font-mono text-text-faint">{doc.size}</span>
-                  <span className="text-text-faint">·</span>
+                  <span className="text-text-faint">Â·</span>
                   <span className="font-mono text-text-faint">{doc.uploadedAt}</span>
                 </div>
 
@@ -81,11 +81,6 @@ export function KnowledgeTab({ documents }: KnowledgeTabProps) {
                   >
                     {statusLabel(doc.status)}
                   </span>
-                  {doc.tablesExtracted !== undefined && doc.tablesExtracted > 0 && (
-                    <span className="flex items-center gap-1 text-[10px] text-text-faint font-mono">
-                      · <Table className="w-2.5 h-2.5" /> {doc.tablesExtracted} tables extracted
-                    </span>
-                  )}
                 </div>
 
                 {doc.summary && (
@@ -101,3 +96,5 @@ export function KnowledgeTab({ documents }: KnowledgeTabProps) {
     </div>
   );
 }
+
+

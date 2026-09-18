@@ -23,6 +23,7 @@ import type {
   CompanyData,
   CompanyEvidence,
 } from "@/types/company";
+import { normalizeRecommendation } from "@/models/company";
 
 interface OverviewTabProps {
   data: CompanyData;
@@ -308,10 +309,10 @@ export function OverviewTab({
 
             {recommendation !==
             "Not available" ? (
-              <RecommendationBadge
-                value={recommendation}
-                size="md"
-              />
+             <RecommendationBadge
+  value={normalizeRecommendation(recommendation)}
+  size="md"
+/>
             ) : (
               <span className="text-sm text-text-muted">
                 Not available

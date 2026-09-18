@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { Recommendation } from './type';
+import type { Recommendation } from '@/models/company';
 
 export function cn(...classes: (string | false | undefined | null)[]): string {
   return classes.filter(Boolean).join(' ');
@@ -237,3 +237,4 @@ export function EmptyState({
     </div>
   );
 }
+

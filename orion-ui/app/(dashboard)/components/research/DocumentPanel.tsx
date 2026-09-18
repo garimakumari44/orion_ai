@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   FileText,
@@ -17,37 +17,59 @@ interface DocumentPanelProps {
   documents?: ResearchDocument[] | null;
 }
 
+type DocumentStatus = NonNullable<
+  ResearchDocument["status"]
+>;
+
+function normalizeStatus(
+  status: ResearchDocument["status"],
+): DocumentStatus {
+  if (status) {
+    return status;
+  }
+
+  return "pending";
+}
+
 function StatusBadge({
   status,
 }: {
   status: ResearchDocument["status"];
 }) {
-  const styles: Record<
-    ResearchDocument["status"],
-    string
+  const safeStatus = normalizeStatus(status);
+
+  const styles: Partial<
+    Record<DocumentStatus, string>
   > = {
+    uploaded: "text-text-muted",
+    pending: "text-warning",
+    ready: "text-success",
     processed: "text-success",
     processing: "text-warning",
     failed: "text-danger",
+    error: "text-danger",
   };
 
-  const labels: Record<
-    ResearchDocument["status"],
-    string
+  const labels: Partial<
+    Record<DocumentStatus, string>
   > = {
+    uploaded: "Uploaded",
+    pending: "Pending",
+    ready: "Ready",
     processed: "Processed",
     processing: "Processing",
     failed: "Failed",
+    error: "Error",
   };
 
   return (
     <span
       className={cn(
         "text-[10px] uppercase tracking-wider font-mono",
-        styles[status]
+        styles[safeStatus] ?? "text-text-muted",
       )}
     >
-      {labels[status]}
+      {labels[safeStatus] ?? "Unknown"}
     </span>
   );
 }
@@ -75,7 +97,6 @@ export function DocumentPanel({
 
   return (
     <div className="max-w-4xl mx-auto px-8 py-6 animate-fade-in">
-
       <div className="mb-5">
         <p className="text-sm text-text-muted">
           Research materials retrieved and processed by
@@ -84,7 +105,6 @@ export function DocumentPanel({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-
         {safeDocuments.map((doc) => (
           <div
             key={String(doc.id)}
@@ -99,13 +119,11 @@ export function DocumentPanel({
 
               {/* Main information */}
               <div className="flex-1 min-w-0">
-
                 <div className="text-sm text-text-primary truncate">
                   {doc.title || "Untitled document"}
                 </div>
 
                 <div className="flex items-center gap-2 mt-1 text-xs min-w-0">
-
                   {doc.source && (
                     <>
                       <span className="text-text-muted truncate">
@@ -125,11 +143,9 @@ export function DocumentPanel({
                       {doc.date}
                     </span>
                   )}
-
                 </div>
 
                 <div className="flex items-center gap-3 mt-2 flex-wrap">
-
                   <StatusBadge
                     status={doc.status}
                   />
@@ -151,13 +167,11 @@ export function DocumentPanel({
                       </span>
                     </>
                   )}
-
                 </div>
               </div>
 
               {/* Actions */}
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-
                 <button
                   type="button"
                   disabled
@@ -177,13 +191,11 @@ export function DocumentPanel({
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                 </button>
-
               </div>
 
             </div>
           </div>
         ))}
-
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-
+﻿
 import { useState } from 'react';
 import { cn, Divider } from '../../components/ui';
 import type { CompanyData } from '@/types';
@@ -26,7 +26,7 @@ export function AnalysisTab({ data }: AnalysisTabProps) {
             {analysisSections.map((section) => (
               <button
                 key={section.id}
-                onClick={() => setActiveSection(section.id)}
+                onClick={() => section.id && setActiveSection(section.id)}
                 className={cn(
                   'w-full text-left px-2.5 py-1.5 rounded text-xs transition-colors',
                   activeSection === section.id
@@ -224,4 +224,5 @@ export function AnalysisTab({ data }: AnalysisTabProps) {
     </div>
   );
 }
+
 

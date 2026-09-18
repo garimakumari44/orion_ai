@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   Lightbulb,
@@ -234,7 +234,7 @@ function parseInsightDescription(
 
     /* Bullet list */
     const bulletMatch =
-      line.match(/^[-*•]\s+(.+)$/);
+      line.match(/^[-*â€¢]\s+(.+)$/);
 
     if (bulletMatch) {
       flushParagraph();
@@ -522,16 +522,8 @@ function StructuredInsight({
                   <h4
                     className={cn(
                       isMajorHeading
-                        ? [
-                            "text-base",
-                            "font-semibold",
-                            "text-text-primary",
-                          ]
-                        : [
-                            "text-sm",
-                            "font-medium",
-                            "text-text-primary",
-                          ],
+                        ? "text-base font-semibold text-text-primary"
+                        : "text-sm font-medium text-text-primary",
                     )}
                   >
                     {renderInlineText(
@@ -850,3 +842,4 @@ export function InsightPanel({
     </div>
   );
 }
+

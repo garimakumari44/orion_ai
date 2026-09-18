@@ -1,3 +1,4 @@
+
 /**
  * API → Frontend Type Mappers
  *
@@ -6,20 +7,21 @@
  *
  * IMPORTANT:
  * - Never invent research content.
+ * - Never create fake research IDs.
  * - Never create fake timestamps.
- * - Never create fake evidence/documents/insights.
- * - Never create synthetic research IDs.
  * - Only expose data that exists in the backend response.
  *
- * Supported backend shapes:
+ * Architecture:
  *
- *   GET /api/research/{id}/results
- *
- * Possible execution containers:
- *
- *   agent_results[]
- *   results[]
- *   executions[]
+ *   API response
+ *        ↓
+ *   types/api.ts
+ *        ↓
+ *   this mapper
+ *        ↓
+ *   models/research.ts
+ *        ↓
+ *   React components
  */
 
 import type { ApiResearchResult } from "./api";
@@ -29,11 +31,13 @@ import type {
   ResearchStageInfo,
   ResearchEvidenceItem,
   ResearchDocument,
+  ResearchDocumentStatus,
   ResearchInsight,
   ResearchReport,
   ReportSection,
+  ReportSectionStatus,
   OverviewData,
-} from "./research";
+} from "@/models/research";
 
 // ============================================================
 // Generic Types
@@ -148,7 +152,7 @@ function asArray<T = unknown>(
   value: unknown,
 ): T[] {
   return Array.isArray(value)
-    ? (value as T[])
+    ? value as T[]
     : [];
 }
 
@@ -535,49 +539,42 @@ function formatPercent(
 // Output Unwrapping
 // ============================================================
 
-/**
- * Research execution outputs can be nested:
- *
- * output
- *   → data
- *      → result
- *         → output
- *            → actual payload
- *
- * Unwrap repeatedly rather than assuming
- * a single nesting level.
- */
 function unwrapOutput(
   output: unknown,
+  depth = 0,
 ): UnknownRecord {
-  let current = output;
-
-  for (let depth = 0; depth < 8; depth++) {
-    if (!isRecord(current)) {
-      return {};
-    }
-
-    if (isRecord(current.data)) {
-      current = current.data;
-      continue;
-    }
-
-    if (isRecord(current.result)) {
-      current = current.result;
-      continue;
-    }
-
-    if (isRecord(current.output)) {
-      current = current.output;
-      continue;
-    }
-
-    return current;
+  if (depth > 8) {
+    return isRecord(output)
+      ? output
+      : {};
   }
 
-  return isRecord(current)
-    ? current
-    : {};
+  if (!isRecord(output)) {
+    return {};
+  }
+
+  if (isRecord(output.data)) {
+    return unwrapOutput(
+      output.data,
+      depth + 1,
+    );
+  }
+
+  if (isRecord(output.result)) {
+    return unwrapOutput(
+      output.result,
+      depth + 1,
+    );
+  }
+
+  if (isRecord(output.output)) {
+    return unwrapOutput(
+      output.output,
+      depth + 1,
+    );
+  }
+
+  return output;
 }
 
 // ============================================================
@@ -610,11 +607,8 @@ function getExecutions(
     const candidates = [
       container.agent_results,
       container.agentResults,
-
       container.results,
-
       container.executions,
-
       container.execution_results,
       container.executionResults,
     ];
@@ -684,23 +678,17 @@ function getExecutionName(
 
   return firstNonEmpty(
     execution.agent_name,
-
     agentName,
-
     execution.task_type,
     execution.task_name,
-
     metadata.agent_name,
     metadata.agent,
     metadata.assigned_executor,
     metadata.executor,
     metadata.task_type,
     metadata.name,
-
     output.agent_name,
-
     outputAgent,
-
     output.type,
     output.task_type,
     output.executor,
@@ -799,15 +787,6 @@ function mapOverview(
         "industry_analysis",
         "industryanalysis",
       ],
-    );
-
-  const companyName =
-    firstNonEmpty(
-      financial.company,
-      financial.company_name,
-      industry.company,
-      industry.company_name,
-      apiRecord.company,
     );
 
   const description =
@@ -969,7 +948,6 @@ function mapOverview(
     firstNonEmpty(
       financial.headquarters,
       financial.location,
-
       financial.city &&
         financial.state
         ? `${asString(
@@ -988,7 +966,6 @@ function mapOverview(
 
   const hasProfileData =
     Boolean(
-      companyName ||
       description ||
       sector ||
       industryName ||
@@ -1030,7 +1007,9 @@ function mapOverview(
     dividendYield !== null ||
     weekHigh !== null ||
     weekLow !== null ||
-    Boolean(explicitWeekRange);
+    Boolean(
+      explicitWeekRange,
+    );
 
   const hasFinancialData =
     revenue !== null ||
@@ -1308,223 +1287,162 @@ function getTopLevelOverview(
 // Evidence
 // ============================================================
 
-/**
- * Evidence can arrive from many backend shapes.
- *
- * Supported examples:
- *
- * {
- *   evidence: [...]
- * }
- *
- * {
- *   claims: [...]
- * }
- *
- * {
- *   matched_evidence: [...]
- * }
- *
- * {
- *   citations: [...]
- * }
- *
- * {
- *   sources: [...]
- * }
- *
- * {
- *   verified_claims: [...]
- * }
- *
- * {
- *   findings: [...]
- * }
- *
- * and these can be nested inside:
- *
- *   data
- *   result
- *   output
- *   agent_results
- *   results
- *   executions
- */
 function mapEvidenceFromItems(
   items: unknown[],
   executionId = "evidence",
 ): ResearchEvidenceItem[] {
-  return items
-    .map(
-      (item, index) => {
-        if (
-          !isRecord(item)
-        ) {
-          return null;
-        }
+  const mapped:
+    Array<ResearchEvidenceItem | null> =
+    [];
 
-        const claim =
-          firstNonEmpty(
-            item.claim,
-            item.statement,
-            item.text,
-            item.description,
-            item.finding,
-            item.conclusion,
-            item.observation,
-            item.content,
-            item.value,
-          );
+  items.forEach(
+    (item, index) => {
+      if (!isRecord(item)) {
+        return;
+      }
 
-        /*
-         * A document/citation without a claim is not
-         * automatically evidence.
-         *
-         * We only expose objects that contain actual
-         * textual evidence content.
-         */
-        if (!claim) {
-          return null;
-        }
+      const claim =
+        firstNonEmpty(
+          item.claim,
+          item.statement,
+          item.text,
+          item.description,
+          item.finding,
+          item.conclusion,
+          item.observation,
+          item.content,
+          item.value,
+        );
 
-        const source =
-          firstNonEmpty(
-            item.source,
-            item.source_name,
-            item.sourceName,
-            item.provider,
-            item.document,
-            item.document_title,
-            item.documentTitle,
-            item.filename,
-            item.file_name,
-            item.fileName,
-            item.reference,
-          );
+      if (!claim) {
+        return;
+      }
 
-        const citation =
-          firstNonEmpty(
-            item.citation,
-            item.citation_text,
-            item.citationText,
-            item.quote,
-            item.excerpt,
-            item.url,
-            item.source_url,
-            item.sourceUrl,
-          );
+      /*
+       * Source is REQUIRED by the canonical model.
+       * Keep an empty string when the backend does not
+       * provide a source rather than returning undefined.
+       */
+      const source =
+        firstNonEmpty(
+          item.source,
+          item.source_name,
+          item.sourceName,
+          item.provider,
+          item.document,
+          item.document_title,
+          item.documentTitle,
+          item.filename,
+          item.file_name,
+          item.fileName,
+          item.reference,
+        );
 
-        const date =
-          asNullableString(
-            item.date ??
-              item.published_at ??
-              item.publishedAt ??
-              item.filing_date ??
-              item.filingDate,
-          ) ??
-          undefined;
+      const citation =
+        firstNonEmpty(
+          item.citation,
+          item.citation_text,
+          item.citationText,
+          item.quote,
+          item.excerpt,
+          item.url,
+          item.source_url,
+          item.sourceUrl,
+        );
 
-        const category =
-          asNullableString(
-            item.category ??
-              item.type ??
-              item.evidence_type ??
-              item.evidenceType ??
-              item.source_type ??
-              item.sourceType,
-          ) ??
-          undefined;
+      const date =
+        asNullableString(
+          item.date ??
+            item.published_at ??
+            item.publishedAt ??
+            item.filing_date ??
+            item.filingDate,
+        ) ?? undefined;
 
-        const confidence =
-          normalizeConfidence(
-            item.confidence ??
-              item.score ??
-              item.relevance ??
-              item.relevance_score ??
-              item.relevanceScore,
-          );
+      const category =
+        asNullableString(
+          item.category ??
+            item.type ??
+            item.evidence_type ??
+            item.evidenceType ??
+            item.source_type ??
+            item.sourceType,
+        ) ?? undefined;
 
-        /*
-         * Backend IDs are preferred.
-         *
-         * The fallback is only a React/data-item identifier.
-         * It is NOT used as a research ID.
-         */
-        const id =
-          firstNonEmpty(
-            item.id,
-            item.evidence_id,
-            item.evidenceId,
-            item.claim_id,
-            item.claimId,
-            item.finding_id,
-            item.findingId,
-          ) ||
-          `${executionId}-${index}`;
+      const confidence =
+        normalizeConfidence(
+          item.confidence ??
+            item.score ??
+            item.relevance ??
+            item.relevance_score ??
+            item.relevanceScore,
+        );
 
-        return {
-          id,
+      const id =
+        firstNonEmpty(
+          item.id,
+          item.evidence_id,
+          item.evidenceId,
+          item.claim_id,
+          item.claimId,
+          item.finding_id,
+          item.findingId,
+        ) ||
+        `${executionId}-${index}`;
 
-          claim,
+      mapped.push({
+        id,
+        claim,
+        source,
+        confidence,
+        date,
+        category,
+        citation,
+      });
+    },
+  );
 
-          source,
-
-          confidence,
-
-          date,
-
-          category,
-
-          citation,
-        };
-      },
-    )
-    .filter(
-      (
-        item,
-      ): item is ResearchEvidenceItem =>
-        item !== null,
-    );
+  /*
+   * The explicit intermediate type above is important.
+   *
+   * Without it TypeScript infers a narrower object type
+   * where id is string, and then rejects a predicate
+   * claiming the value is ResearchEvidenceItem because
+   * ResearchEvidenceItem.id is string | number.
+   */
+  return mapped.filter(
+    (
+      item,
+    ): item is ResearchEvidenceItem =>
+      item !== null,
+  );
 }
 
-// ------------------------------------------------------------
+// ============================================================
 // Evidence Candidate Extraction
-// ------------------------------------------------------------
+// ============================================================
 
 const EVIDENCE_KEYS = [
   "evidence",
-
   "evidence_items",
   "evidenceItems",
-
   "claims",
-
   "verified_claims",
   "verifiedClaims",
-
   "matched_evidence",
   "matchedEvidence",
-
   "supporting_evidence",
   "supportingEvidence",
-
   "supporting_claims",
   "supportingClaims",
-
   "citations",
-
   "findings",
-
   "observations",
-
   "key_findings",
   "keyFindings",
-
   "research_findings",
   "researchFindings",
-
   "references",
-
   "sources",
 ];
 
@@ -1567,9 +1485,6 @@ function collectEvidenceArrays(
     }
   }
 
-  /*
-   * Continue through common wrappers.
-   */
   const nestedKeys = [
     "data",
     "result",
@@ -1580,7 +1495,9 @@ function collectEvidenceArrays(
   ];
 
   for (const key of nestedKeys) {
-    if (value[key] !== undefined) {
+    if (
+      value[key] !== undefined
+    ) {
       collectEvidenceArrays(
         value[key],
         results,
@@ -1593,7 +1510,8 @@ function collectEvidenceArrays(
 function extractEvidenceCandidates(
   value: unknown,
 ): unknown[] {
-  const arrays: unknown[][] = [];
+  const arrays: unknown[][] =
+    [];
 
   collectEvidenceArrays(
     value,
@@ -1602,10 +1520,6 @@ function extractEvidenceCandidates(
 
   return arrays.flat();
 }
-
-// ------------------------------------------------------------
-// Evidence Object Detection
-// ------------------------------------------------------------
 
 function looksLikeEvidenceObject(
   value: unknown,
@@ -1656,10 +1570,6 @@ function looksLikeEvidenceObject(
   );
 }
 
-// ------------------------------------------------------------
-// Recursive Evidence Discovery
-// ------------------------------------------------------------
-
 function collectEvidenceObjects(
   value: unknown,
   results: UnknownRecord[],
@@ -1676,9 +1586,9 @@ function collectEvidenceObjects(
           item,
         )
       ) {
-        results.push(
-          item as UnknownRecord,
-        );
+        if (isRecord(item)) {
+          results.push(item);
+        }
       } else {
         collectEvidenceObjects(
           item,
@@ -1707,9 +1617,6 @@ function collectEvidenceObjects(
     key,
     child,
   ] of Object.entries(value)) {
-    /*
-     * Skip obviously unrelated scalar fields.
-     */
     if (
       typeof child !==
         "object" ||
@@ -1718,11 +1625,6 @@ function collectEvidenceObjects(
       continue;
     }
 
-    /*
-     * Avoid recursively treating arbitrary financial
-     * numbers/objects as evidence unless they contain
-     * evidence-like structures.
-     */
     const normalizedKey =
       key
         .toLowerCase()
@@ -1761,10 +1663,6 @@ function collectEvidenceObjects(
   }
 }
 
-// ------------------------------------------------------------
-// Evidence Dedupe
-// ------------------------------------------------------------
-
 function dedupeEvidence(
   evidence: ResearchEvidenceItem[],
 ): ResearchEvidenceItem[] {
@@ -1777,7 +1675,7 @@ function dedupeEvidence(
   return evidence.filter(
     (item) => {
       const id =
-        firstNonEmpty(
+        asString(
           item.id,
         );
 
@@ -1790,8 +1688,9 @@ function dedupeEvidence(
         ]
           .map(
             (value) =>
-              asString(value)
-                .toLowerCase(),
+              asString(
+                value,
+              ).toLowerCase(),
           )
           .join("|");
 
@@ -1824,10 +1723,6 @@ function dedupeEvidence(
   );
 }
 
-// ------------------------------------------------------------
-// Evidence Mapper
-// ------------------------------------------------------------
-
 function mapEvidence(
   api: ApiResearchResult,
   executions: BackendResearchExecution[],
@@ -1835,29 +1730,21 @@ function mapEvidence(
   const apiRecord =
     api as unknown as UnknownRecord;
 
-  const evidence: ResearchEvidenceItem[] =
+  const evidence:
+    ResearchEvidenceItem[] =
     [];
-
-  // ----------------------------------------------------------
-  // 1. Direct top-level evidence
-  // ----------------------------------------------------------
 
   const topLevelCandidates = [
     apiRecord.evidence,
     apiRecord.evidence_items,
     apiRecord.evidenceItems,
-
     apiRecord.claims,
-
     apiRecord.verified_claims,
     apiRecord.verifiedClaims,
-
     apiRecord.matched_evidence,
     apiRecord.matchedEvidence,
-
     apiRecord.supporting_evidence,
     apiRecord.supportingEvidence,
-
     apiRecord.citations,
   ];
 
@@ -1870,9 +1757,7 @@ function mapEvidence(
         candidate,
       );
 
-    if (
-      items.length === 0
-    ) {
+    if (items.length === 0) {
       continue;
     }
 
@@ -1883,10 +1768,6 @@ function mapEvidence(
       ),
     );
   }
-
-  // ----------------------------------------------------------
-  // 2. Wrapped top-level containers
-  // ----------------------------------------------------------
 
   const containers: unknown[] = [
     apiRecord.data,
@@ -1920,15 +1801,8 @@ function mapEvidence(
       );
     }
 
-    /*
-     * Recursive object discovery catches structures
-     * such as:
-     *
-     * result:
-     *   financial_analysis:
-     *     verified_claims: [...]
-     */
-    const objects: UnknownRecord[] =
+    const objects:
+      UnknownRecord[] =
       [];
 
     collectEvidenceObjects(
@@ -1936,9 +1810,7 @@ function mapEvidence(
       objects,
     );
 
-    if (
-      objects.length > 0
-    ) {
+    if (objects.length > 0) {
       evidence.push(
         ...mapEvidenceFromItems(
           objects,
@@ -1947,30 +1819,6 @@ function mapEvidence(
       );
     }
   }
-
-  // ----------------------------------------------------------
-  // 3. Inspect EVERY successful execution
-  // ----------------------------------------------------------
-  //
-  // This is the important fix.
-  //
-  // Previously we only looked for an execution whose
-  // name was "evidence".
-  //
-  // Real research pipelines frequently return evidence
-  // from:
-  //
-  //   financial analyst
-  //   industry analyst
-  //   valuation analyst
-  //   risk analyst
-  //   document researcher
-  //   verification agent
-  //   research analyst
-  //   investment committee
-  //
-  // We therefore inspect every successful execution.
-  // ----------------------------------------------------------
 
   for (
     const execution of executions
@@ -2002,44 +1850,27 @@ function mapEvidence(
       ) ||
       "evidence";
 
-    // --------------------------------------------------------
-    // Explicit evidence fields
-    // --------------------------------------------------------
-
     const explicitCandidates = [
       output.evidence,
-
       output.evidence_items,
       output.evidenceItems,
-
       output.claims,
-
       output.verified_claims,
       output.verifiedClaims,
-
       output.matched_evidence,
       output.matchedEvidence,
-
       output.supporting_evidence,
       output.supportingEvidence,
-
       output.supporting_claims,
       output.supportingClaims,
-
       output.citations,
-
       output.findings,
-
       output.observations,
-
       output.key_findings,
       output.keyFindings,
-
       output.research_findings,
       output.researchFindings,
-
       output.references,
-
       output.sources,
     ];
 
@@ -2052,9 +1883,7 @@ function mapEvidence(
           candidate,
         );
 
-      if (
-        items.length === 0
-      ) {
+      if (items.length === 0) {
         continue;
       }
 
@@ -2066,10 +1895,6 @@ function mapEvidence(
       );
     }
 
-    // --------------------------------------------------------
-    // Deep evidence discovery inside execution output
-    // --------------------------------------------------------
-
     const discoveredObjects:
       UnknownRecord[] =
       [];
@@ -2080,8 +1905,7 @@ function mapEvidence(
     );
 
     if (
-      discoveredObjects.length >
-      0
+      discoveredObjects.length > 0
     ) {
       evidence.push(
         ...mapEvidenceFromItems(
@@ -2101,6 +1925,37 @@ function mapEvidence(
 // Documents
 // ============================================================
 
+function normalizeDocumentStatus(
+  value: unknown,
+): ResearchDocumentStatus {
+  const raw =
+    asString(
+      value,
+    ).toLowerCase();
+
+  switch (raw) {
+    case "failed":
+    case "error":
+      return "failed";
+
+    case "processed":
+    case "ready":
+    case "complete":
+    case "completed":
+    case "success":
+    case "succeeded":
+      return "processed";
+
+    case "processing":
+    case "pending":
+    case "uploaded":
+    case "queued":
+    case "running":
+    default:
+      return "processing";
+  }
+}
+
 function mapDocumentsFromItems(
   items: unknown[],
   executionId = "document",
@@ -2111,9 +1966,7 @@ function mapDocumentsFromItems(
 
   items.forEach(
     (item, index) => {
-      if (
-        !isRecord(item)
-      ) {
+      if (!isRecord(item)) {
         return;
       }
 
@@ -2136,101 +1989,66 @@ function mapDocumentsFromItems(
         return;
       }
 
-      const rawStatus =
-        asString(
-          item.status,
-        ).toLowerCase();
+      const id =
+        firstNonEmpty(
+          item.id,
+          item.document_id,
+          item.documentId,
+          item.source_id,
+          item.sourceId,
+          item.file_id,
+          item.fileId,
+          item.uuid,
+        ) ||
+        `${executionId}-${index}`;
 
-      let status:
-        | "processing"
-        | "processed"
-        | "failed"
-        | undefined;
+      const source =
+        firstNonEmpty(
+          item.source,
+          item.source_name,
+          item.sourceName,
+          item.provider,
+          item.url,
+        );
 
-      if (
-        rawStatus === "failed" ||
-        rawStatus === "error"
-      ) {
-        status = "failed";
-      } else if (
-        rawStatus ===
-          "processing" ||
-        rawStatus ===
-          "pending" ||
-        rawStatus ===
-          "queued" ||
-        rawStatus ===
-          "running"
-      ) {
-        status = "processing";
-      } else if (
-        rawStatus ===
-          "processed" ||
-        rawStatus ===
-          "complete" ||
-        rawStatus ===
-          "completed" ||
-        rawStatus ===
-          "success" ||
-        rawStatus ===
-          "succeeded"
-      ) {
-        status = "processed";
-      }
+      const date =
+        asNullableString(
+          item.date ??
+            item.published_at ??
+            item.publishedAt ??
+            item.filing_date ??
+            item.filingDate,
+        ) ??
+        undefined;
+
+      const type =
+        firstNonEmpty(
+          item.type,
+          item.document_type,
+          item.documentType,
+          item.mime_type,
+          item.mimeType,
+        );
+
+      const size =
+        asNullableString(
+          item.size ??
+            item.file_size ??
+            item.fileSize,
+        ) ??
+        undefined;
 
       documents.push({
-        id:
-          firstNonEmpty(
-            item.id,
-            item.document_id,
-            item.documentId,
-            item.source_id,
-            item.sourceId,
-            item.file_id,
-            item.fileId,
-            item.uuid,
-          ) ||
-          `${executionId}-${index}`,
-
+        id,
         title,
-
-        source:
-          firstNonEmpty(
-            item.source,
-            item.source_name,
-            item.sourceName,
-            item.provider,
-            item.url,
+        source,
+        date,
+        status:
+          normalizeDocumentStatus(
+            item.status,
           ),
-
-        date:
-          asNullableString(
-            item.date ??
-              item.published_at ??
-              item.publishedAt ??
-              item.filing_date ??
-              item.filingDate,
-          ) ??
-          undefined,
-
-        status,
-
-        type:
-          firstNonEmpty(
-            item.type,
-            item.document_type,
-            item.documentType,
-            item.mime_type,
-            item.mimeType,
-          ),
-
-        size:
-          asNullableString(
-            item.size ??
-              item.file_size ??
-              item.fileSize,
-          ) ??
-          undefined,
+        type,
+        size,
       });
     },
   );
@@ -2243,18 +2061,12 @@ function collectNestedDocuments(
   results: unknown[],
   depth = 0,
 ): void {
-  if (
-    depth > 6
-  ) {
+  if (depth > 6) {
     return;
   }
 
-  if (
-    Array.isArray(value)
-  ) {
-    for (
-      const item of value
-    ) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
       collectNestedDocuments(
         item,
         results,
@@ -2265,41 +2077,28 @@ function collectNestedDocuments(
     return;
   }
 
-  if (
-    !isRecord(value)
-  ) {
+  if (!isRecord(value)) {
     return;
   }
 
   const documentKeys = [
     "documents",
     "document",
-
     "sources",
-
     "source_documents",
     "sourceDocuments",
-
     "retrieved_documents",
     "retrievedDocuments",
-
     "retrieved_docs",
     "retrievedDocs",
-
     "research_documents",
     "researchDocuments",
-
     "reference_documents",
     "referenceDocuments",
-
     "references",
-
     "filings",
-
     "reports",
-
     "transcripts",
-
     "articles",
   ];
 
@@ -2310,9 +2109,7 @@ function collectNestedDocuments(
       value[key];
 
     if (
-      Array.isArray(
-        candidate,
-      )
+      Array.isArray(candidate)
     ) {
       results.push(
         ...candidate,
@@ -2344,6 +2141,35 @@ function collectNestedDocuments(
   }
 }
 
+function dedupeDocuments(
+  documents: ResearchDocument[],
+): ResearchDocument[] {
+  const seen =
+    new Set<string>();
+
+  return documents.filter(
+    (document) => {
+      const key =
+        firstNonEmpty(
+          document.id,
+          document.title,
+        );
+
+      if (!key) {
+        return true;
+      }
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+
+      return true;
+    },
+  );
+}
+
 function mapDocuments(
   api: ApiResearchResult,
   executions: BackendResearchExecution[],
@@ -2364,9 +2190,7 @@ function mapDocuments(
     ResearchDocument[] =
     [];
 
-  if (
-    candidates.length > 0
-  ) {
+  if (candidates.length > 0) {
     documents.push(
       ...mapDocumentsFromItems(
         candidates,
@@ -2423,37 +2247,6 @@ function mapDocuments(
   );
 }
 
-function dedupeDocuments(
-  documents: ResearchDocument[],
-): ResearchDocument[] {
-  const seen =
-    new Set<string>();
-
-  return documents.filter(
-    (document) => {
-      const key =
-        firstNonEmpty(
-          document.id,
-          document.title,
-        );
-
-      if (!key) {
-        return true;
-      }
-
-      if (
-        seen.has(key)
-      ) {
-        return false;
-      }
-
-      seen.add(key);
-
-      return true;
-    },
-  );
-}
-
 // ============================================================
 // Insights
 // ============================================================
@@ -2465,104 +2258,106 @@ function mapInsightsFromItems(
     | "risk"
     | "catalyst",
 ): ResearchInsight[] {
-  return items
-    .map(
-      (item, index) => {
-        if (
-          !isRecord(item) &&
-          typeof item !==
-            "string"
-        ) {
-          return null;
-        }
+  const mapped:
+    Array<ResearchInsight | null> =
+    [];
 
-        const description =
+  items.forEach(
+    (item, index) => {
+      if (
+        !isRecord(item) &&
+        typeof item !== "string"
+      ) {
+        return;
+      }
+
+      const description =
+        isRecord(item)
+          ? firstNonEmpty(
+              item.description,
+              item.statement,
+              item.text,
+              item.claim,
+              item.finding,
+              item.summary,
+              item.risk,
+              item.reason,
+              item.value,
+              item.name,
+              item.title,
+            )
+          : asString(item);
+
+      if (!description) {
+        return;
+      }
+
+      const rawType =
+        isRecord(item)
+          ? asString(
+              item.type,
+            ).toLowerCase()
+          : defaultType;
+
+      const normalizedType =
+        rawType === "risk"
+          ? "risk"
+          : rawType === "catalyst"
+            ? "catalyst"
+            : "insight";
+
+      const id =
+        isRecord(item)
+          ? firstNonEmpty(
+              item.id,
+              item.insight_id,
+              item.insightId,
+              item.finding_id,
+              item.findingId,
+              item.claim_id,
+              item.claimId,
+            ) ||
+            `${defaultType}-${index}`
+          : `${defaultType}-${index}`;
+
+      const title =
+        isRecord(item)
+          ? firstNonEmpty(
+              item.title,
+              item.name,
+              item.heading,
+              item.label,
+            )
+          : "";
+
+      mapped.push({
+        id,
+
+        type:
+          normalizedType,
+
+        title,
+
+        description,
+
+        confidence:
           isRecord(item)
-            ? firstNonEmpty(
-                item.description,
-                item.statement,
-                item.text,
-                item.claim,
-                item.finding,
-                item.summary,
-                item.risk,
-                item.reason,
-                item.value,
-                item.name,
-                item.title,
+            ? normalizeConfidence(
+                item.confidence ??
+                  item.score ??
+                  item.relevance,
               )
-            : asString(item);
+            : 0,
+      });
+    },
+  );
 
-        if (!description) {
-          return null;
-        }
-
-        const rawType =
-          isRecord(item)
-            ? asString(
-                item.type,
-              ).toLowerCase()
-            : defaultType;
-
-        const normalizedType =
-          rawType === "risk"
-            ? "risk"
-            : rawType ===
-                "catalyst"
-              ? "catalyst"
-              : defaultType;
-
-        const id =
-          isRecord(item)
-            ? firstNonEmpty(
-                item.id,
-                item.insight_id,
-                item.insightId,
-                item.finding_id,
-                item.findingId,
-                item.claim_id,
-                item.claimId,
-              ) ||
-              `${defaultType}-${index}`
-            : `${defaultType}-${index}`;
-
-        const title =
-          isRecord(item)
-            ? firstNonEmpty(
-                item.title,
-                item.name,
-                item.heading,
-                item.label,
-              )
-            : "";
-
-        return {
-          id,
-
-          type:
-            normalizedType,
-
-          title,
-
-          description,
-
-          confidence:
-            isRecord(item)
-              ? normalizeConfidence(
-                  item.confidence ??
-                    item.score ??
-                    item.relevance,
-                )
-              : 0,
-        };
-      },
-    )
-    .filter(
-      (
-        item,
-      ): item is ResearchInsight =>
-        item !== null,
-    );
+  return mapped.filter(
+    (
+      item,
+    ): item is ResearchInsight =>
+      item !== null,
+  );
 }
 
 function dedupeInsights(
@@ -2577,7 +2372,7 @@ function dedupeInsights(
   return insights.filter(
     (insight) => {
       const id =
-        firstNonEmpty(
+        asString(
           insight.id,
         );
 
@@ -2624,17 +2419,12 @@ function mapInsights(
 
   const topLevelCandidates = [
     apiRecord.insights,
-
     apiRecord.key_insights,
     apiRecord.keyInsights,
-
     apiRecord.findings,
-
     apiRecord.key_findings,
     apiRecord.keyFindings,
-
     apiRecord.highlights,
-
     apiRecord.observations,
   ];
 
@@ -2651,10 +2441,7 @@ function mapInsights(
         candidate,
       );
 
-    if (
-      items.length ===
-      0
-    ) {
+    if (items.length === 0) {
       continue;
     }
 
@@ -2666,9 +2453,7 @@ function mapInsights(
     );
   }
 
-  if (
-    direct.length > 0
-  ) {
+  if (direct.length > 0) {
     return dedupeInsights(
       direct,
     );
@@ -2693,47 +2478,31 @@ function mapInsights(
         execution,
       );
 
-    const executionName =
-      getExecutionName(
-        execution,
-      ).replace(
-        /[\s_-]/g,
-        "",
-      );
-
     const risks = [
       ...asArray<unknown>(
         output.risks,
       ),
-
       ...asArray<unknown>(
         output.key_risks,
       ),
-
       ...asArray<unknown>(
         output.keyRisks,
       ),
-
       ...asArray<unknown>(
         output.risk_factors,
       ),
-
       ...asArray<unknown>(
         output.riskFactors,
       ),
-
       ...asArray<unknown>(
         output.downside_risks,
       ),
-
       ...asArray<unknown>(
         output.downsideRisks,
       ),
     ];
 
-    if (
-      risks.length > 0
-    ) {
+    if (risks.length > 0) {
       insights.push(
         ...mapInsightsFromItems(
           risks,
@@ -2746,27 +2515,21 @@ function mapInsights(
       ...asArray<unknown>(
         output.catalysts,
       ),
-
       ...asArray<unknown>(
         output.growth_catalysts,
       ),
-
       ...asArray<unknown>(
         output.growthCatalysts,
       ),
-
       ...asArray<unknown>(
         output.upside_catalysts,
       ),
-
       ...asArray<unknown>(
         output.upsideCatalysts,
       ),
     ];
 
-    if (
-      catalysts.length > 0
-    ) {
+    if (catalysts.length > 0) {
       insights.push(
         ...mapInsightsFromItems(
           catalysts,
@@ -2779,51 +2542,39 @@ function mapInsights(
       ...asArray<unknown>(
         output.insights,
       ),
-
       ...asArray<unknown>(
         output.key_insights,
       ),
-
       ...asArray<unknown>(
         output.keyInsights,
       ),
-
       ...asArray<unknown>(
         output.findings,
       ),
-
       ...asArray<unknown>(
         output.key_findings,
       ),
-
       ...asArray<unknown>(
         output.keyFindings,
       ),
-
       ...asArray<unknown>(
         output.highlights,
       ),
-
       ...asArray<unknown>(
         output.observations,
       ),
-
       ...asArray<unknown>(
         output.key_observations,
       ),
-
       ...asArray<unknown>(
         output.keyObservations,
       ),
-
       ...asArray<unknown>(
         output.conclusions,
       ),
     ];
 
-    if (
-      findings.length > 0
-    ) {
+    if (findings.length > 0) {
       insights.push(
         ...mapInsightsFromItems(
           findings,
@@ -2846,9 +2597,10 @@ function mapInsights(
     if (thesis) {
       insights.push({
         id:
-          `${executionName || "execution"}-investment-thesis`,
+          "investment-thesis",
 
-        type: "insight",
+        type:
+          "insight",
 
         title:
           "Investment Thesis",
@@ -2874,25 +2626,13 @@ function mapInsights(
         output.investmentRating,
       );
 
-    if (
-      recommendation &&
-      (
-        executionName.includes(
-          "committee",
-        ) ||
-        executionName.includes(
-          "recommend",
-        ) ||
-        executionName.includes(
-          "investment",
-        )
-      )
-    ) {
+    if (recommendation) {
       insights.push({
         id:
-          `${executionName || "execution"}-recommendation`,
+          "recommendation",
 
-        type: "insight",
+        type:
+          "insight",
 
         title:
           "Recommendation",
@@ -2917,25 +2657,13 @@ function mapInsights(
         output.riskLevel,
       );
 
-    if (
-      overallRisk &&
-      (
-        executionName.includes(
-          "risk",
-        ) ||
-        executionName.includes(
-          "committee",
-        ) ||
-        executionName.includes(
-          "investment",
-        )
-      )
-    ) {
+    if (overallRisk) {
       insights.push({
         id:
-          `${executionName || "execution"}-overall-risk`,
+          "overall-risk",
 
-        type: "risk",
+        type:
+          "risk",
 
         title:
           "Overall Risk",
@@ -2983,9 +2711,7 @@ function textFromValue(
   value: unknown,
   depth = 0,
 ): string {
-  if (
-    depth > 6
-  ) {
+  if (depth > 6) {
     return "";
   }
 
@@ -3050,6 +2776,36 @@ function textFromValue(
   return "";
 }
 
+function normalizeReportSectionStatus(
+  value: unknown,
+): ReportSectionStatus {
+  const raw =
+    asString(
+      value,
+    ).toLowerCase();
+
+  switch (raw) {
+    case "in-progress":
+    case "in_progress":
+    case "running":
+    case "processing":
+      return "in-progress";
+
+    case "waiting":
+    case "pending":
+    case "queued":
+      return "waiting";
+
+    case "complete":
+    case "completed":
+    case "done":
+    case "success":
+    case "succeeded":
+    default:
+      return "complete";
+  }
+}
+
 function addReportSection(
   sections: ReportSection[],
   id: string,
@@ -3083,6 +2839,11 @@ function addReportSection(
     return;
   }
 
+  /*
+   * ReportSection.lastUpdated is required by the canonical
+   * model. If the backend did not provide a timestamp,
+   * use an empty string rather than inventing a timestamp.
+   */
   sections.push({
     id,
 
@@ -3096,8 +2857,7 @@ function addReportSection(
     lastUpdated:
       getExecutionTimestamp(
         execution,
-      ) ??
-      undefined,
+      ) ?? "",
   });
 }
 
@@ -3114,9 +2874,7 @@ function mapTopLevelReport(
   const raw =
     apiRecord.report;
 
-  if (
-    !isRecord(raw)
-  ) {
+  if (!isRecord(raw)) {
     return null;
   }
 
@@ -3125,100 +2883,70 @@ function mapTopLevelReport(
       raw.sections,
     );
 
-  const sections =
-    rawSections
-      .map(
-        (
-          section,
-          index,
-        ) => {
-          if (
-            !isRecord(
-              section,
-            )
-          ) {
-            return null;
-          }
+  const sections:
+    ReportSection[] =
+    [];
 
-          const content =
-            textFromValue(
-              section.content,
-            );
+  rawSections.forEach(
+    (
+      section,
+      index,
+    ) => {
+      if (
+        !isRecord(section)
+      ) {
+        return;
+      }
 
-          if (!content) {
-            return null;
-          }
+      const content =
+        textFromValue(
+          section.content,
+        );
 
-          const rawStatus =
-            asString(
-              section.status,
-            ).toLowerCase();
+      if (!content) {
+        return;
+      }
 
-          let status:
-            | "complete"
-            | "in-progress"
-            | "waiting" =
-            "complete";
+      const id =
+        firstNonEmpty(
+          section.id,
+        ) ||
+        `section-${index}`;
 
-          if (
-            rawStatus ===
-              "in-progress" ||
-            rawStatus ===
-              "running"
-          ) {
-            status =
-              "in-progress";
-          } else if (
-            rawStatus ===
-              "waiting" ||
-            rawStatus ===
-              "pending"
-          ) {
-            status =
-              "waiting";
-          }
+      const title =
+        firstNonEmpty(
+          section.title,
+          section.name,
+        ) ||
+        id;
 
-          const id =
-            firstNonEmpty(
-              section.id,
-            ) ||
-            `section-${index}`;
+      sections.push({
+        id,
 
-          const title =
-            firstNonEmpty(
-              section.title,
-            ) ||
-            id;
+        title,
 
-          return {
-            id,
+        status:
+          normalizeReportSectionStatus(
+            section.status,
+          ),
 
-            title,
+        content,
 
-            status,
+        /*
+         * Canonical ReportSection.lastUpdated is required.
+         * Empty string means the backend supplied no timestamp;
+         * it is not a fabricated timestamp.
+         */
+        lastUpdated:
+          firstNonEmpty(
+            section.lastUpdated,
+            section.last_updated,
+          ),
+      });
+    },
+  );
 
-            content,
-
-            lastUpdated:
-              firstNonEmpty(
-                section.lastUpdated,
-                section.last_updated,
-              ) ||
-              undefined,
-          };
-        },
-      )
-      .filter(
-        (
-          section,
-        ): section is ReportSection =>
-          section !== null,
-      );
-
-  if (
-    sections.length ===
-    0
-  ) {
+  if (sections.length === 0) {
     return null;
   }
 
@@ -3226,8 +2954,7 @@ function mapTopLevelReport(
     title:
       firstNonEmpty(
         raw.title,
-      ) ||
-      null,
+      ),
 
     sections,
   };
@@ -3246,9 +2973,7 @@ function mapReport(
       api,
     );
 
-  if (
-    topLevelReport
-  ) {
+  if (topLevelReport) {
     return topLevelReport;
   }
 
@@ -3285,7 +3010,7 @@ function mapReport(
         getTimestamp(
           apiRecord.updated_at,
         ) ??
-        undefined,
+        "",
     });
   }
 
@@ -3379,8 +3104,7 @@ function mapReport(
     title:
       firstNonEmpty(
         apiRecord.title,
-      ) ||
-      null,
+      ),
 
     sections,
   };
@@ -3393,156 +3117,147 @@ function mapReport(
 function mapStages(
   executions: BackendResearchExecution[],
 ): ResearchStageInfo[] {
-  if (
-    executions.length ===
-    0
-  ) {
-    return [];
-  }
+  const stages:
+    ResearchStageInfo[] =
+    [];
 
-  return executions
-    .map(
-      (
-        execution,
-        index,
-      ) => {
-        const name =
-          firstNonEmpty(
-            execution.task_name,
-            execution.task_type,
-            execution.agent_name,
-            execution.agent,
-          );
+  executions.forEach(
+    (
+      execution,
+      index,
+    ) => {
+      const name =
+        firstNonEmpty(
+          execution.task_name,
+          execution.task_type,
+          execution.agent_name,
+          execution.agent,
+        );
 
-        if (!name) {
-          return null;
-        }
+      if (!name) {
+        return;
+      }
 
-        const executionId =
-          firstNonEmpty(
-            execution.execution_id,
-            execution.task_id,
-          ) ||
-          `execution-${index}`;
+      const executionId =
+        firstNonEmpty(
+          execution.execution_id,
+          execution.task_id,
+        ) ||
+        `execution-${index}`;
 
-        const rawStatus =
-          firstNonEmpty(
-            execution.status,
-          ).toLowerCase();
+      const rawStatus =
+        firstNonEmpty(
+          execution.status,
+        ).toLowerCase();
 
-        const success =
-          execution.success;
+      const success =
+        execution.success;
 
-        let status:
-          | "waiting"
-          | "in-progress"
-          | "complete"
-          | "failed";
+      let status:
+        | "waiting"
+        | "in-progress"
+        | "complete"
+        | "failed";
 
-        if (
-          success === false ||
-          rawStatus === "failed" ||
-          rawStatus === "error"
-        ) {
-          status =
-            "failed";
-        } else if (
-          rawStatus ===
-            "completed" ||
-          rawStatus ===
-            "complete" ||
-          rawStatus ===
-            "success" ||
-          rawStatus ===
-            "succeeded" ||
-          success === true
-        ) {
-          status =
-            "complete";
-        } else if (
-          rawStatus ===
-            "running" ||
-          rawStatus ===
-            "in-progress" ||
-          rawStatus ===
-            "in_progress" ||
-          rawStatus ===
-            "processing"
-        ) {
-          status =
-            "in-progress";
-        } else {
-          status =
-            "waiting";
-        }
+      if (
+        success === false ||
+        rawStatus === "failed" ||
+        rawStatus === "error"
+      ) {
+        status =
+          "failed";
+      } else if (
+        rawStatus ===
+          "completed" ||
+        rawStatus ===
+          "complete" ||
+        rawStatus ===
+          "success" ||
+        rawStatus ===
+          "succeeded" ||
+        success === true
+      ) {
+        status =
+          "complete";
+      } else if (
+        rawStatus ===
+          "running" ||
+        rawStatus ===
+          "in-progress" ||
+        rawStatus ===
+          "in_progress" ||
+        rawStatus ===
+          "processing"
+      ) {
+        status =
+          "in-progress";
+      } else {
+        status =
+          "waiting";
+      }
 
-        const backendProgress =
-          asNullableNumber(
-            execution.progress,
-          );
+      const backendProgress =
+        asNullableNumber(
+          execution.progress,
+        );
 
-        const progress =
-          backendProgress !==
-          null
-            ? clamp(
-                backendProgress,
-                0,
-                100,
-              )
-            : status ===
-                "complete"
-              ? 100
-              : 0;
+      const progress =
+        backendProgress !==
+        null
+          ? clamp(
+              backendProgress,
+              0,
+              100,
+            )
+          : status ===
+              "complete"
+            ? 100
+            : 0;
 
-        const detail =
-          firstNonEmpty(
-            execution.error,
-            execution.current_step,
-          );
+      /*
+       * IMPORTANT:
+       *
+       * ResearchStageInfo only contains:
+       *
+       *   id
+       *   label
+       *   status
+       *   detail?
+       *   progress?
+       *
+       * Do not return backend-only fields such as:
+       *
+       *   name
+       *   startedAt
+       *   completedAt
+       *   error
+       *
+       * from this mapper.
+       */
+      const detail =
+        firstNonEmpty(
+          execution.error,
+          execution.current_step,
+        );
 
-        return {
-          id:
-            executionId,
+      stages.push({
+        id:
+          executionId,
 
+        label:
           name,
 
-          label:
-            name,
+        status,
 
-          status,
+        progress,
 
-          progress,
+        detail:
+          detail || undefined,
+      });
+    },
+  );
 
-          startedAt:
-            getTimestamp(
-              execution.started_at,
-            ),
-
-          completedAt:
-            getTimestamp(
-              execution.completed_at,
-            ),
-
-          error:
-            execution.success ===
-            false
-              ? asNullableString(
-                  execution.error,
-                )
-              : null,
-
-          detail:
-            detail ||
-            undefined,
-        };
-      },
-    )
-    .filter(
-      (
-        stage,
-      ): stage is ResearchStageInfo =>
-        stage !== null,
-    );
+  return stages;
 }
 
 // ============================================================
@@ -3595,16 +3310,37 @@ export function mapApiResearchResult(
       api,
     );
 
-  const researchId =
+  /*
+   * A research result must come from a real backend
+   * research identifier.
+   *
+   * Do not generate a synthetic ID here.
+   */
+  const researchIdValue =
     apiRecord.research_id ??
     apiRecord.researchId ??
     apiRecord.id ??
     null;
 
+  if (
+    researchIdValue === null ||
+    researchIdValue === undefined
+  ) {
+    throw new Error(
+      "Research result is missing a research ID.",
+    );
+  }
+
   const id =
-    apiRecord.id ??
-    researchId ??
-    null;
+    asString(
+      researchIdValue,
+    );
+
+  if (!id) {
+    throw new Error(
+      "Research result contains an invalid research ID.",
+    );
+  }
 
   const status =
     normalizeStatus(
@@ -3629,18 +3365,6 @@ export function mapApiResearchResult(
       executions,
     );
 
-  /*
-   * IMPORTANT:
-   *
-   * Evidence is now extracted from:
-   *
-   * 1. top-level evidence
-   * 2. wrapped response containers
-   * 3. every successful execution
-   * 4. nested evidence/claims/citations/findings
-   *
-   * Nothing is fabricated.
-   */
   const evidence =
     mapEvidence(
       api,
@@ -3686,24 +3410,25 @@ export function mapApiResearchResult(
         ? apiRecord.metadata_json
         : null;
 
+  /*
+   * IMPORTANT:
+   *
+   * Do not return updatedAt here.
+   *
+   * The canonical models/research.ts ResearchResult
+   * does not define updatedAt.
+   */
   return {
-    id:
-      id !== null &&
-      id !== undefined
-        ? String(id)
-        : null,
+    id,
 
     researchId:
-      researchId !== null &&
-      researchId !== undefined
-        ? String(researchId)
-        : null,
+      id,
 
     title:
-      title || null,
+      title || "",
 
     summary:
-      summary || null,
+      summary || "",
 
     status:
       status || null,
@@ -3725,11 +3450,7 @@ export function mapApiResearchResult(
         apiRecord.created_at,
       ),
 
-    updatedAt:
-      getTimestamp(
-        apiRecord.updated_at,
-      ),
-
     metadata,
   };
 }
+

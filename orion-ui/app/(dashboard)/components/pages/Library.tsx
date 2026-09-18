@@ -9,7 +9,7 @@ Search,
 Loader2,
 Trash2,
 } from "lucide-react";
-
+import { normalizeRecommendation } from "@/models/company";
 import {
 RecommendationBadge,
 TickerLogo,
@@ -502,11 +502,9 @@ return ( <div className="h-full overflow-y-auto"> <div className="max-w-5xl mx-a
                   {/* Recommendation */}
                   <td className="px-4 py-3">
                     {recommendation ? (
-                      <RecommendationBadge
-                        value={
-                          recommendation
-                        }
-                      />
+                     <RecommendationBadge
+  value={normalizeRecommendation(recommendation)}
+/>
                     ) : (
                       <span className="text-xs text-text-faint">
                         —

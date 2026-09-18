@@ -61,7 +61,7 @@ export function HomePage({
 
                 return (
                   destination === "reports" ||
-                  destination === "report" ||
+        
                   destination === "research"
                 );
               })

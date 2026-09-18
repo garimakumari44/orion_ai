@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   WorkspaceData,
   ChatMessage,
   SuggestedQuestion,
@@ -7,6 +7,7 @@ import type {
   DraftSection,
   WorkspaceEvidence,
   ResearchContextInfo,
+  ResearchAssumption,
   ResearchStage,
 } from "@/types";
 
@@ -16,7 +17,7 @@ import type {
 } from "@/types/research";
 
 /**
- * Backend → Workspace mapper
+ * Backend â†’ Workspace mapper
  *
  * IMPORTANT:
  * This file intentionally contains NO mock research data.
@@ -184,7 +185,7 @@ function normalizeProgress(
  * Only use an estimated time if the backend
  * actually supplied one.
  *
- * Never invent "3–5 minutes".
+ * Never invent "3â€“5 minutes".
  */
 function getEstimatedTime(
   research: ResearchResult,
@@ -491,16 +492,43 @@ function mapContext(
       research,
     );
 
-  const assumptions =
-    Array.isArray(
-      research.context?.assumptions,
-    )
+  const rawAssumptions =
+    Array.isArray(research.context?.assumptions)
       ? research.context.assumptions
-      : Array.isArray(
-            research.assumptions,
-          )
+      : Array.isArray(research.assumptions)
         ? research.assumptions
         : [];
+
+  const assumptions: ResearchAssumption[] =
+    rawAssumptions
+      .map((assumption, index) => {
+        if (typeof assumption === "string") {
+          const text = assumption.trim();
+
+          if (!text) {
+            return null;
+          }
+
+          return {
+            id: `assumption-${index}`,
+            label: text,
+            value: text,
+          };
+        }
+
+        if (
+          assumption &&
+          typeof assumption === "object"
+        ) {
+          return assumption as ResearchAssumption;
+        }
+
+        return null;
+      })
+      .filter(
+        (assumption): assumption is ResearchAssumption =>
+          assumption !== null,
+      );
 
   return {
     company:
@@ -763,6 +791,7 @@ function mapAgentActions(
 function normalizeAgentActionStatus(
   status:
     | string
+    | null
     | undefined,
 ): AgentAction["status"] {
   const normalized =
@@ -950,6 +979,7 @@ function mapDraftSections(
 function normalizeDraftStatus(
   status:
     | string
+    | null
     | undefined,
 ): DraftSection["status"] {
   const normalized =
@@ -1063,3 +1093,5 @@ function mapEvidence(
         ),
     );
 }
+
+

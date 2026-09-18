@@ -1,4 +1,6 @@
+
 import type {
+  ResearchAssumption,
   ResearchInsight,
   ResearchReport,
 } from "./research";
@@ -24,6 +26,22 @@ export type ChatMessageRole =
   | "assistant"
   | "system";
 
+export interface ChatMessageTable {
+  headers: string[];
+
+  rows: string[][];
+}
+
+export interface ChatCitation {
+  id?: string;
+
+  title?: string;
+
+  source?: string;
+
+  url?: string | null;
+}
+
 export interface ChatMessage {
   id?: string;
 
@@ -32,6 +50,12 @@ export interface ChatMessage {
   content: string;
 
   createdAt?: string | null;
+
+  timestamp?: string | null;
+
+  tables?: ChatMessageTable[];
+
+  citations?: ChatCitation[];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -39,9 +63,9 @@ export interface ChatMessage {
 /* -------------------------------------------------------------------------- */
 
 export interface SuggestedQuestion {
-  id?: string;
+  id: string;
 
-  question: string;
+  text: string;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -72,26 +96,57 @@ export interface KnowledgeDoc {
   processedAt?: string | null;
 
   pages?: number | null;
+
+  summary?: string | null;
+
+  description?: string | null;
 }
 
 /* -------------------------------------------------------------------------- */
 /* Agent actions                                                              */
 /* -------------------------------------------------------------------------- */
 
+export type AgentActionStatus =
+  | "done"
+  | "active"
+  | "pending"
+  | "failed";
+
 export interface AgentAction {
   id?: string;
 
   agent?: string | null;
 
-  action: string;
+  label: string;
 
-  status?: string | null;
+  detail: string;
 
-  createdAt?: string | null;
+  timestamp: string;
 
-  completedAt?: string | null;
+  status?: AgentActionStatus | null;
 
-  error?: string | null;
+  /**
+   * Original action name retained for API compatibility.
+   */
+  action?: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Agent                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export interface WorkspaceAgent {
+  currentTask: string;
+
+  progress: number;
+
+  evidenceCount: number;
+
+  sourcesCount: number;
+
+  confidence: number;
+
+  recentActions: AgentAction[];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -117,11 +172,15 @@ export interface DraftSection {
 /* -------------------------------------------------------------------------- */
 
 export interface WorkspaceEvidence {
-  id?: string;
+  id: string;
 
-  claim: string;
+  statement: string;
 
-  source?: string | null;
+  claim?: string;
+
+  source: string;
+
+  docType?: string | null;
 
   sourceTitle?: string | null;
 
@@ -133,7 +192,9 @@ export interface WorkspaceEvidence {
 
   excerpt?: string | null;
 
-  confidence?: number | null;
+  confidence: number;
+
+  date?: string | null;
 
   createdAt?: string | null;
 
@@ -142,6 +203,8 @@ export interface WorkspaceEvidence {
   category?: string | null;
 
   citation?: string | null;
+
+  filing?: string | null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -149,23 +212,29 @@ export interface WorkspaceEvidence {
 /* -------------------------------------------------------------------------- */
 
 export interface ResearchContextInfo {
+  company: string;
+
+  ticker: string;
+
   companyName?: string | null;
 
-  ticker?: string | null;
-
-  industry?: string | null;
+  industry: string;
 
   sector?: string | null;
 
   description?: string | null;
 
-  objective?: string | null;
+  objective: string;
 
-  template?: string | null;
+  template: string;
 
-  depth?: string | null;
+  depth: string;
 
-  assumptions?: string[] | null;
+  assumptions: ResearchAssumption[];
+
+  uploadedDocs: number;
+
+  progress: number;
 
   headquarters?: string | null;
 
@@ -185,7 +254,11 @@ export interface ResearchContextInfo {
 export interface ResearchStage {
   id?: string;
 
-  name: string;
+  /**
+   * Some API responses provide only a label.
+   * The mapper supplies a name where necessary.
+   */
+  name?: string;
 
   label?: string | null;
 
@@ -203,53 +276,84 @@ export interface ResearchStage {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Workspace draft                                                            */
+/* -------------------------------------------------------------------------- */
+
+export interface WorkspaceDraft {
+  title: string;
+
+  sections: DraftSection[];
+}
+
+/* -------------------------------------------------------------------------- */
 /* Workspace data                                                             */
 /* -------------------------------------------------------------------------- */
 
 export interface WorkspaceData {
-  researchId: string | null;
+  /**
+   * Backend/project name.
+   */
+  projectName: string;
 
-  title: string | null;
+  /**
+   * Company name supplied by the workspace service.
+   */
+  company: string;
 
-  companyName: string | null;
+  /**
+   * Display title used by Workspace.tsx.
+   */
+  title?: string | null;
 
-  ticker: string | null;
+  /**
+   * Alias used by the dashboard/workspace UI.
+   */
+  companyName?: string | null;
 
-  status: string | null;
+  ticker: string;
 
-  summary: string | null;
+  status: string;
 
-  progress: number | null;
+  progress: number;
 
-  currentStage: string | null;
+  estimatedTime: string;
+
+  currentStage: string;
 
   stages: ResearchStage[];
-
-  evidence: WorkspaceEvidence[];
-
-  documents: KnowledgeDoc[];
-
-  insights: ResearchInsight[];
-
-  report: ResearchReport;
 
   messages: ChatMessage[];
 
   suggestedQuestions: SuggestedQuestion[];
 
-  agentActions: AgentAction[];
-
-  draftSections: DraftSection[];
-
   context: ResearchContextInfo;
 
-  confidence: number | null;
+  documents: KnowledgeDoc[];
 
-  sourcesCount: number | null;
+  agent: WorkspaceAgent;
 
-  evidenceCount: number | null;
+  /**
+   * Flattened agent actions consumed by Workspace.tsx.
+   */
+  agentActions?: AgentAction[];
 
-  createdAt: string | null;
+  draft: WorkspaceDraft;
 
-  updatedAt: string | null;
+  /**
+   * Flattened draft sections consumed by Workspace.tsx.
+   */
+  draftSections?: DraftSection[];
+
+  evidence: WorkspaceEvidence[];
+
+  insights?: ResearchInsight[];
+
+  report?: ResearchReport;
+
+  researchId?: string | null;
+
+  createdAt?: string | null;
+
+  updatedAt?: string | null;
 }
+

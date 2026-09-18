@@ -9,6 +9,7 @@ import {
 import { useRef, useState } from "react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
+import { normalizeRecommendation } from "@/models/company";
 
 import {
   cn,
@@ -483,11 +484,9 @@ export function ReportTab({
             </div>
 
             <RecommendationBadge
-              value={
-                recommendation
-              }
-              size="md"
-            />
+  value={normalizeRecommendation(recommendation)}
+  size="md"
+/>
           </div>
 
           {/* Fair Value */}
@@ -1051,12 +1050,10 @@ export function ReportTab({
 
         <div className="bg-bg-surface border border-border rounded-lg p-5">
           <div className="flex items-center gap-4 mb-4 flex-wrap">
-            <RecommendationBadge
-              value={
-                recommendation
-              }
-              size="lg"
-            />
+           <RecommendationBadge
+  value={normalizeRecommendation(recommendation)}
+  size="lg"
+/>
 
             <div>
               <span className="text-sm text-text-secondary">

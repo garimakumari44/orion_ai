@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+﻿import { useState, useRef, useEffect } from 'react';
 import { ArrowUp, RotateCcw, FileText, ExternalLink, Sparkles } from 'lucide-react';
 import { cn } from '../../components/ui';
-import type { ChatMessage, SuggestedQuestion } from '../type';
+import type { ChatMessage, SuggestedQuestion } from "@/types";
 
 interface ConversationTabProps {
   messages: ChatMessage[];
@@ -118,7 +118,7 @@ export function ConversationTab({ messages, suggestedQuestions }: ConversationTa
                   <div className="bg-bg-surface border border-border rounded-lg px-4 py-3.5">
                     <MessageContent content={msg.content} />
                     {msg.tables?.map((t, i) => (
-                      <MessageTable key={i} title={t.title} rows={t.rows} />
+                      <MessageTable key={i} title={`Table ${i + 1}`} rows={t.rows} />
                     ))}
                     {msg.citations && msg.citations.length > 0 && (
                       <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border-subtle">
@@ -130,8 +130,8 @@ export function ConversationTab({ messages, suggestedQuestions }: ConversationTa
                               key={i}
                               className="inline-flex items-center gap-1 text-[11px] text-text-muted bg-bg-elevated border border-border rounded px-1.5 py-0.5"
                             >
-                              {c.label}
-                              <span className="text-text-faint">· {c.source}</span>
+                              {c.title ?? c.source ?? `Source ${i + 1}`}
+                              <span className="text-text-faint">Â· {c.source}</span>
                             </span>
                           ))}
                         </div>
@@ -141,7 +141,7 @@ export function ConversationTab({ messages, suggestedQuestions }: ConversationTa
                 )}
                 <div className={cn('flex items-center gap-2 mt-1 px-1', msg.role === 'user' ? 'justify-end' : '')}>
                   <span className="text-[10px] text-text-faint font-mono">{msg.timestamp}</span>
-                  {msg.role === 'assistant' && msg.status === 'complete' && (
+                  {msg.role === 'assistant' && (
                     <button className="flex items-center gap-1 text-[10px] text-text-faint hover:text-text-muted transition-colors">
                       <RotateCcw className="w-2.5 h-2.5" />
                       Regenerate
@@ -188,3 +188,5 @@ export function ConversationTab({ messages, suggestedQuestions }: ConversationTa
     </div>
   );
 }
+
+

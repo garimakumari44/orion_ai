@@ -21,18 +21,41 @@ import type {
   ResearchStageInfo,
 } from "@/types/research";
 
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
 /* Props                                                                      */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
 
 interface ResearchPageProps {
   researchId: string | number;
   data?: ResearchResult | null;
 }
 
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
+/* Derived domain types                                                       */
+/* ========================================================================== */
+
+type ResearchDocumentStatus =
+  NonNullable<
+    NonNullable<ResearchResult["documents"]>[number]["status"]
+  >;
+
+type ReportSection =
+  NonNullable<
+    NonNullable<ResearchResult["report"]>["sections"]
+  >[number];
+
+type ReportSectionStatus =
+  NonNullable<ReportSection["status"]>;
+
+type ResearchInsightType =
+  ResearchInsight["type"];
+
+type ResearchStageStatus =
+  NonNullable<ResearchStageInfo["status"]>;
+
+/* ========================================================================== */
 /* Generic helpers                                                            */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
 
 function isObject(
   value: unknown,
@@ -118,6 +141,25 @@ function firstNumber(
   return null;
 }
 
+function firstScalar(
+  ...values: unknown[]
+): string | number | null {
+  for (const value of values) {
+    if (
+      typeof value === "string" ||
+      typeof value === "number"
+    ) {
+      return value;
+    }
+
+    if (typeof value === "boolean") {
+      return String(value);
+    }
+  }
+
+  return null;
+}
+
 function firstDefined(
   ...values: unknown[]
 ): unknown {
@@ -145,170 +187,9 @@ function getObject(
   return null;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Array helpers                                                              */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Return the first non-empty array.
- *
- * Empty arrays are deliberately ignored when a later location contains
- * actual data.
- */
-function firstNonEmptyArray(
-  ...values: unknown[]
-): unknown[] {
-  let firstArray: unknown[] | null = null;
-
-  for (const value of values) {
-    if (!Array.isArray(value)) {
-      continue;
-    }
-
-    if (firstArray === null) {
-      firstArray = value;
-    }
-
-    if (value.length > 0) {
-      return value;
-    }
-  }
-
-  return firstArray ?? [];
-}
-
-/**
- * Recursively search an object tree for arrays belonging to one of the
- * requested keys.
- *
- * This handles backend responses such as:
- *
- * result
- *   -> data
- *      -> research
- *         -> analysis
- *            -> insights
- *
- * and:
- *
- * result
- *   -> research
- *      -> findings
- *         -> items
- */
-function findArraysByKeys(
-  root: unknown,
-  keys: string[],
-  maxDepth = 8,
-): unknown[][] {
-  const results: unknown[][] = [];
-
-  const normalizedKeys = new Set(
-    keys.map((key) =>
-      key.toLowerCase(),
-    ),
-  );
-
-  function walk(
-    value: unknown,
-    depth: number,
-  ) {
-    if (
-      depth > maxDepth ||
-      !isObject(value)
-    ) {
-      return;
-    }
-
-    for (const [
-      key,
-      child,
-    ] of Object.entries(value)) {
-      const normalizedKey =
-        key.toLowerCase();
-
-      if (
-        normalizedKeys.has(
-          normalizedKey,
-        ) &&
-        Array.isArray(child)
-      ) {
-        results.push(child);
-      }
-
-      if (isObject(child)) {
-        walk(child, depth + 1);
-      }
-    }
-  }
-
-  walk(root, 0);
-
-  return results;
-}
-
-/**
- * Get the first useful array from a recursive search.
- */
-function findFirstNonEmptyArrayByKeys(
-  root: unknown,
-  keys: string[],
-): unknown[] {
-  const arrays =
-    findArraysByKeys(
-      root,
-      keys,
-    );
-
-  return firstNonEmptyArray(
-    ...arrays,
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Raw response unwrapping                                                    */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Unwrap common API envelopes without destroying the original response.
- */
-function unwrapResearchResponse(
-  value: unknown,
-): Record<string, unknown> {
-  if (!isObject(value)) {
-    return {};
-  }
-
-  let current: unknown = value;
-
-  for (let index = 0; index < 8; index += 1) {
-    if (!isObject(current)) {
-      break;
-    }
-
-    const next =
-      getObject(
-        current.data,
-        current.result,
-        current.response,
-        current.payload,
-      );
-
-    if (!next) {
-      break;
-    }
-
-    current = next;
-  }
-
-  return isObject(current)
-    ? current
-    : {};
-}
-
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
 /* Status helpers                                                             */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
 
 function normalizeStatus(
   value: unknown,
@@ -329,9 +210,7 @@ function isFinishedStatus(
     "success",
     "succeeded",
     "done",
-  ].includes(
-    normalizeStatus(value),
-  );
+  ].includes(normalizeStatus(value));
 }
 
 function isFailedStatus(
@@ -343,9 +222,7 @@ function isFailedStatus(
     "error",
     "cancelled",
     "canceled",
-  ].includes(
-    normalizeStatus(value),
-  );
+  ].includes(normalizeStatus(value));
 }
 
 function isActiveStatus(
@@ -358,159 +235,321 @@ function isActiveStatus(
     "processing",
     "in-progress",
     "started",
-  ].includes(
-    normalizeStatus(value),
-  );
+  ].includes(normalizeStatus(value));
 }
 
-/* -------------------------------------------------------------------------- */
+function normalizeDocumentStatus(
+  value: unknown,
+): ResearchDocumentStatus | undefined {
+  const normalized =
+    normalizeStatus(value);
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  return normalized as ResearchDocumentStatus;
+}
+
+function normalizeReportSectionStatus(
+  value: unknown,
+): ReportSectionStatus {
+  const normalized =
+    normalizeStatus(value);
+
+  if (!normalized) {
+    return "complete" as ReportSectionStatus;
+  }
+
+  return normalized as ReportSectionStatus;
+}
+
+function normalizeInsightType(
+  value: unknown,
+): ResearchInsightType {
+  const normalized =
+    normalizeStatus(value);
+
+  if (
+    normalized === "risk" ||
+    normalized === "risks"
+  ) {
+    return "risk" as ResearchInsightType;
+  }
+
+  if (
+    normalized === "catalyst" ||
+    normalized === "catalysts"
+  ) {
+    return "catalyst" as ResearchInsightType;
+  }
+
+  return "insight" as ResearchInsightType;
+}
+
+function normalizeStageStatus(
+  value: unknown,
+): ResearchStageStatus | null {
+  const normalized =
+    normalizeStatus(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized as ResearchStageStatus;
+}
+
+/* ========================================================================== */
 /* Research ID                                                                */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
 
 function resolveResearchId(
-  requestedId: string | number,
+  researchId:
+    | string
+    | number
+    | null
+    | undefined,
   data?: ResearchResult | null,
 ): string {
-  return (
-    firstString(
-      data?.researchId,
-      data?.id,
-      requestedId,
-    ) || ""
+  const direct =
+    safeString(researchId);
+
+  if (direct) {
+    return direct;
+  }
+
+  return firstString(
+    data?.researchId,
+    data?.id,
   );
 }
 
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
+/* Array helpers                                                              */
+/* ========================================================================== */
+
+function firstNonEmptyArray(
+  ...values: unknown[]
+): unknown[] {
+  for (const value of values) {
+    if (
+      Array.isArray(value) &&
+      value.length > 0
+    ) {
+      return value;
+    }
+  }
+
+  return [];
+}
+
+function findArraysByKeys(
+  source:
+    | Record<string, unknown>
+    | null,
+  keys: string[],
+): unknown[][] {
+  if (!source) {
+    return [];
+  }
+
+  const arrays: unknown[][] = [];
+
+  for (const key of keys) {
+    const value = source[key];
+
+    if (Array.isArray(value)) {
+      arrays.push(value);
+    }
+  }
+
+  return arrays;
+}
+
+function findFirstNonEmptyArrayByKeys(
+  source:
+    | Record<string, unknown>
+    | null,
+  keys: string[],
+): unknown[] {
+  const arrays =
+    findArraysByKeys(
+      source,
+      keys,
+    );
+
+  return firstNonEmptyArray(
+    ...arrays,
+  );
+}
+
+/* ========================================================================== */
+/* API response unwrapping                                                    */
+/* ========================================================================== */
+
+function unwrapResearchResponse(
+  raw: unknown,
+): Record<string, unknown> {
+  if (!isObject(raw)) {
+    return {};
+  }
+
+  const nested = [
+    raw.data,
+    raw.result,
+    raw.research,
+    raw.research_result,
+    raw.researchResult,
+  ];
+
+  for (const candidate of nested) {
+    if (isObject(candidate)) {
+      return candidate;
+    }
+  }
+
+  return raw;
+}
+
+/* ========================================================================== */
 /* Evidence normalization                                                     */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
 
 function normalizeEvidence(
   raw: unknown[],
 ): ResearchEvidenceItem[] {
   return raw
-    .filter(
-      (item) =>
-        isObject(item) ||
-        typeof item === "string",
-    )
-    .map((item, index) => {
-      if (typeof item === "string") {
-        const claim =
-          item.trim();
+    .map(
+      (
+        value,
+        index,
+      ): ResearchEvidenceItem | null => {
+        if (
+          typeof value === "string"
+        ) {
+          const claim =
+            value.trim();
 
-        if (!claim) {
+          if (!claim) {
+            return null;
+          }
+
+          return {
+            id: `evidence-${index}`,
+            claim,
+            source: "Unknown",
+            confidence: 0,
+            date: undefined,
+            category: undefined,
+            citation: "",
+            filing: undefined,
+          };
+        }
+
+        if (!isObject(value)) {
+          return null;
+        }
+
+        const claim =
+          firstString(
+            value.claim,
+            value.statement,
+            value.text,
+            value.description,
+            value.finding,
+            value.evidence,
+          );
+
+        const source =
+          firstString(
+            value.source,
+            value.source_name,
+            value.sourceName,
+            value.company,
+            value.publisher,
+            value.document,
+            "Unknown",
+          );
+
+        const confidence =
+          firstNumber(
+            value.confidence,
+            value.score,
+            value.relevance,
+          ) ?? 0;
+
+        const id =
+          firstString(
+            value.id,
+            value.evidence_id,
+            value.evidenceId,
+          ) ||
+          `evidence-${index}`;
+
+        const date =
+          firstString(
+            value.date,
+            value.publishedAt,
+            value.published_at,
+            value.timestamp,
+          ) || undefined;
+
+        const category =
+          firstString(
+            value.category,
+            value.type,
+          ) || undefined;
+
+        const citation =
+          firstString(
+            value.citation,
+            value.reference,
+            value.url,
+            value.link,
+          );
+
+        const filing =
+          firstString(
+            value.filing,
+            value.filing_type,
+            value.filingType,
+          ) || undefined;
+
+        if (
+          !claim &&
+          !source &&
+          !citation
+        ) {
           return null;
         }
 
         return {
-          id: `evidence-${index}`,
-          claim,
-          source: undefined,
-          confidence: 0,
-          date: undefined,
-          category: undefined,
-          citation: undefined,
-          filing: undefined,
+          ...value,
+          id,
+          claim:
+            claim || "Evidence",
+          source:
+            source || "Unknown",
+          confidence,
+          date,
+          category,
+          citation,
+          filing,
         } as ResearchEvidenceItem;
-      }
-
-      const claim =
-        firstString(
-          item.claim,
-          item.statement,
-          item.finding,
-          item.description,
-          item.text,
-          item.content,
-          item.summary,
-        );
-
-      const source =
-        firstString(
-          item.source,
-          item.source_name,
-          item.sourceName,
-          item.source_type,
-          item.sourceType,
-        );
-
-      const confidence =
-        firstNumber(
-          item.confidence,
-          item.confidence_score,
-          item.confidenceScore,
-        );
-
-      const id =
-        firstString(
-          item.id,
-          item.evidence_id,
-          item.evidenceId,
-        );
-
-      return {
-        ...item,
-
-        id:
-          id ||
-          `evidence-${index}`,
-
-        claim,
-
-        source:
-          source || undefined,
-
-        confidence:
-          confidence ?? 0,
-
-        date:
-          firstString(
-            item.date,
-            item.publishedAt,
-            item.published_at,
-          ) || undefined,
-
-        category:
-          firstString(
-            item.category,
-            item.type,
-            item.evidence_type,
-            item.evidenceType,
-          ) || undefined,
-
-        citation:
-          firstString(
-            item.citation,
-            item.reference,
-            item.source_reference,
-            item.sourceReference,
-            item.url,
-          ) || undefined,
-
-        filing:
-          firstString(
-            item.filing,
-            item.filing_name,
-            item.filingName,
-          ) || undefined,
-      } as ResearchEvidenceItem;
-    })
+      },
+    )
     .filter(
       (
         item,
       ): item is ResearchEvidenceItem =>
-        item !== null &&
-        Boolean(
-          item.claim ||
-          item.source ||
-          item.citation,
-        ),
+        item !== null,
     );
 }
 
-/* -------------------------------------------------------------------------- */
-/* Document normalization                                                     */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
+/* Documents                                                                  */
+/* ========================================================================== */
 
 function normalizeDocuments(
   raw: unknown[],
@@ -568,10 +607,12 @@ function normalizeDocuments(
         ) || undefined,
 
       status:
-        firstString(
-          item.status,
-          item.state,
-        ) || undefined,
+        normalizeDocumentStatus(
+          firstString(
+            item.status,
+            item.state,
+          ),
+        ),
 
       pages:
         firstNumber(
@@ -602,382 +643,351 @@ function normalizeDocuments(
     }));
 }
 
-/* -------------------------------------------------------------------------- */
-/* Insight normalization                                                      */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
+/* Insights                                                                   */
+/* ========================================================================== */
 
 function normalizeInsights(
   raw: unknown[],
 ): ResearchInsight[] {
   return raw
-    .filter(
-      (item) =>
-        isObject(item) ||
-        typeof item === "string",
-    )
-    .map((item, index) => {
-      if (typeof item === "string") {
-        const text =
-          item.trim();
+    .map(
+      (
+        value,
+        index,
+      ): ResearchInsight | null => {
+        if (
+          typeof value === "string"
+        ) {
+          const text =
+            value.trim();
 
-        if (!text) {
+          if (!text) {
+            return null;
+          }
+
+          return {
+            id: `insight-${index}`,
+            title:
+              "Research Insight",
+            type:
+              "insight" as ResearchInsightType,
+            description: text,
+            summary: text,
+            impact: null,
+            confidence: 0,
+            recommendation: null,
+          };
+        }
+
+        if (!isObject(value)) {
+          return null;
+        }
+
+        const title =
+          firstString(
+            value.title,
+            value.name,
+            value.heading,
+          ) ||
+          "Research Insight";
+
+        const description =
+          firstString(
+            value.description,
+            value.text,
+            value.insight,
+            value.finding,
+            value.summary,
+          );
+
+        const summary =
+          firstString(
+            value.summary,
+            value.description,
+            value.text,
+            value.insight,
+          ) || description;
+
+        const type =
+          normalizeInsightType(
+            value.type ??
+              value.category ??
+              value.kind,
+          );
+
+        const impact =
+          firstString(
+            value.impact,
+            value.impact_level,
+            value.impactLevel,
+          ) || null;
+
+        const confidence =
+          firstNumber(
+            value.confidence,
+            value.score,
+          ) ?? 0;
+
+        const recommendation =
+          firstString(
+            value.recommendation,
+            value.action,
+            value.next_step,
+            value.nextStep,
+          ) || null;
+
+        const id =
+          firstString(
+            value.id,
+            value.insight_id,
+            value.insightId,
+          ) ||
+          `insight-${index}`;
+
+        if (!description) {
           return null;
         }
 
         return {
-          id: `insight-${index}`,
-          title: "Research Insight",
-          type: "insight",
-          description: text,
-          summary: text,
-          impact: null,
-          confidence: null,
-          recommendation: null,
+          ...value,
+          id,
+          title,
+          type,
+          description,
+          summary:
+            summary || null,
+          impact,
+          confidence,
+          recommendation,
         } as ResearchInsight;
-      }
-
-      const description =
-        firstString(
-          item.description,
-          item.content,
-          item.text,
-          item.finding,
-          item.statement,
-          item.summary,
-          item.details,
-          item.body,
-        );
-
-      const title =
-        firstString(
-          item.title,
-          item.name,
-          item.heading,
-          item.label,
-          item.insight,
-        );
-
-      let type =
-        firstString(
-          item.type,
-          item.category,
-          item.insight_type,
-          item.insightType,
-        )
-          .toLowerCase()
-          .trim();
-
-      if (
-        ![
-          "insight",
-          "risk",
-          "catalyst",
-        ].includes(type)
-      ) {
-        type = "insight";
-      }
-
-      const id =
-        firstString(
-          item.id,
-          item.insight_id,
-          item.insightId,
-        );
-
-      const summary =
-        firstString(
-          item.summary,
-          item.description,
-          item.content,
-        );
-
-      return {
-        ...item,
-
-        id:
-          id ||
-          `insight-${index}`,
-
-        title:
-          title ||
-          "Research Insight",
-
-        type,
-
-        description:
-          description ||
-          null,
-
-        summary:
-          summary ||
-          null,
-
-        impact:
-          firstString(
-            item.impact,
-            item.impact_level,
-            item.impactLevel,
-          ) || null,
-
-        confidence:
-          firstNumber(
-            item.confidence,
-            item.confidence_score,
-            item.confidenceScore,
-          ),
-
-        recommendation:
-          firstString(
-            item.recommendation,
-            item.action,
-            item.recommended_action,
-            item.recommendedAction,
-          ) || null,
-      } as ResearchInsight;
-    })
+      },
+    )
     .filter(
       (
         item,
       ): item is ResearchInsight =>
-        item !== null &&
-        Boolean(
-          item.description ||
-          item.summary ||
-          item.title,
-        ),
+        item !== null,
     );
 }
 
-/* -------------------------------------------------------------------------- */
-/* Stage normalization                                                        */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
+/* Stages                                                                     */
+/* ========================================================================== */
 
 function normalizeStages(
   raw: unknown[],
 ): ResearchStageInfo[] {
   return raw
     .filter(isObject)
-    .map((item, index) => {
-      const stageStatus =
-        firstString(
-          item.status,
-          item.state,
-        )
-          .toLowerCase()
-          .trim();
+    .map(
+      (
+        item,
+        index,
+      ) =>
+        ({
+          ...item,
 
-      return {
-        id:
-          firstString(
-            item.id,
-            item.stage_id,
-            item.stageId,
-            item.key,
-          ) ||
-          `stage-${index}`,
+          id:
+            firstString(
+              item.id,
+              item.stage_id,
+              item.stageId,
+            ) ||
+            `stage-${index}`,
 
-        name:
-          firstString(
-            item.name,
-            item.stage,
-            item.key,
-            item.label,
-            item.id,
-          ) ||
-          `Stage ${index + 1}`,
+          name:
+            firstString(
+              item.name,
+              item.label,
+              item.stage,
+            ) ||
+            `Stage ${index + 1}`,
 
-        label:
-          firstString(
-            item.label,
-            item.name,
-            item.stage,
-          ) || undefined,
+          label:
+            firstString(
+              item.label,
+              item.name,
+              item.stage,
+            ) ||
+            `Stage ${index + 1}`,
 
-        status:
-          stageStatus || null,
+          status:
+            normalizeStageStatus(
+              firstString(
+                item.status,
+                item.state,
+              ),
+            ),
 
-        progress:
-          firstNumber(
-            item.progress,
-            item.percent,
-            item.percentage,
-            item.progress_percent,
-            item.progressPercent,
-          ) ?? 0,
+          progress: Math.min(
+            100,
+            Math.max(
+              0,
+              safeNumber(
+                item.progress,
+                0,
+              ),
+            ),
+          ),
 
-        startedAt:
-          firstString(
-            item.startedAt,
-            item.started_at,
-          ) || null,
+          startedAt:
+            firstString(
+              item.startedAt,
+              item.started_at,
+            ) || null,
 
-        completedAt:
-          firstString(
-            item.completedAt,
-            item.completed_at,
-          ) || null,
+          completedAt:
+            firstString(
+              item.completedAt,
+              item.completed_at,
+            ) || null,
 
-        error:
-          firstString(
-            item.error,
-            item.error_message,
-            item.errorMessage,
-          ) || null,
+          error:
+            firstString(
+              item.error,
+              item.error_message,
+              item.errorMessage,
+            ) || null,
 
-        detail:
-          firstString(
-            item.detail,
-            item.message,
-            item.description,
-          ) || undefined,
-      };
-    });
+          detail:
+            firstString(
+              item.detail,
+              item.description,
+              item.message,
+            ) || undefined,
+        }) as ResearchStageInfo,
+    );
 }
 
-/* -------------------------------------------------------------------------- */
-/* Report normalization                                                       */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
+/* Report                                                                     */
+/* ========================================================================== */
 
 function normalizeReport(
   rawReport: unknown,
-  root: Record<string, unknown>,
+  fallback?:
+    | ResearchResult["report"]
+    | null,
 ): ResearchResult["report"] {
-  let reportObject =
+  const reportObject =
     isObject(rawReport)
       ? rawReport
-      : {};
+      : null;
 
-  /*
-   * Sometimes report is nested one level deeper.
-   */
-  if (
-    isObject(reportObject.data)
-  ) {
-    reportObject =
-      reportObject.data;
-  }
-
-  if (
-    isObject(reportObject.report)
-  ) {
-    reportObject =
-      reportObject.report;
-  }
-
-  const rawSections =
+  const sectionsRaw =
     firstNonEmptyArray(
-      reportObject.sections,
-      reportObject.reportSections,
-      reportObject.report_sections,
-      reportObject.items,
-      root.reportSections,
-      root.report_sections,
-
-      findFirstNonEmptyArrayByKeys(
-        root,
-        [
-          "sections",
-          "reportSections",
-          "report_sections",
-        ],
-      ),
+      reportObject?.sections,
+      reportObject?.report_sections,
+      reportObject?.reportSections,
     );
 
-  /*
-   * Some APIs return report sections directly as:
-   *
-   * report: [...]
-   */
-  const directReportArray =
-    Array.isArray(rawReport)
-      ? rawReport
-      : [];
-
-  const sectionSource =
-    rawSections.length > 0
-      ? rawSections
-      : directReportArray;
-
-  const sections =
-    sectionSource
-      .filter(
-        (section) =>
-          isObject(section) ||
-          typeof section === "string",
-      )
+  const sections: ReportSection[] =
+    sectionsRaw
       .map(
-        (section, index) => {
+        (
+          value,
+          index,
+        ): ReportSection | null => {
           if (
-            typeof section ===
-            "string"
+            typeof value === "string"
           ) {
+            const text =
+              value.trim();
+
+            if (!text) {
+              return null;
+            }
+
             return {
               id: `section-${index}`,
-              title: `Section ${index + 1}`,
-              status: "complete",
-              content:
-                section.trim(),
+              title: `Section ${
+                index + 1
+              }`,
+              content: text,
+              status:
+                "complete" as ReportSectionStatus,
               lastUpdated:
                 undefined,
             };
           }
 
+          if (!isObject(value)) {
+            return null;
+          }
+
+          const title =
+            firstString(
+              value.title,
+              value.name,
+              value.heading,
+            ) ||
+            `Section ${
+              index + 1
+            }`;
+
+          const content =
+            firstString(
+              value.content,
+              value.text,
+              value.body,
+              value.description,
+              value.summary,
+            );
+
+          if (!content) {
+            return null;
+          }
+
+          const lastUpdated =
+            firstString(
+              value.lastUpdated,
+              value.last_updated,
+              value.updatedAt,
+              value.updated_at,
+            ) || undefined;
+
           return {
-            ...section,
+            ...value,
 
             id:
               firstString(
-                section.id,
-                section.section_id,
-                section.sectionId,
+                value.id,
+                value.section_id,
+                value.sectionId,
               ) ||
               `section-${index}`,
 
-            title:
-              firstString(
-                section.title,
-                section.name,
-                section.heading,
-                section.label,
-              ) ||
-              `Section ${index + 1}`,
+            title,
+
+            content,
 
             status:
-              firstString(
-                section.status,
-                section.state,
-              ) ||
-              "complete",
-
-            content:
-              firstString(
-                section.content,
-                section.text,
-                section.body,
-                section.description,
-                section.summary,
+              normalizeReportSectionStatus(
+                value.status ??
+                  value.state,
               ),
 
-            lastUpdated:
-              firstString(
-                section.lastUpdated,
-                section.last_updated,
-                section.updatedAt,
-                section.updated_at,
-              ) || undefined,
-          };
+            lastUpdated,
+          } as ReportSection;
         },
+      )
+      .filter(
+        (
+          item,
+        ): item is ReportSection =>
+          item !== null,
       );
 
-  /*
-   * If there are no explicit sections but report itself contains text,
-   * expose that text as a single report section instead of losing it.
-   */
+  /* ---------------------------------------------------------------------- */
+  /* Single report object containing text                                   */
+  /* ---------------------------------------------------------------------- */
+
   if (
     sections.length === 0 &&
-    isObject(rawReport)
+    reportObject
   ) {
-    const reportContent =
+    const content =
       firstString(
         reportObject.content,
         reportObject.text,
@@ -986,19 +996,22 @@ function normalizeReport(
         reportObject.description,
       );
 
-    if (reportContent) {
+    if (content) {
       sections.push({
         id: "section-0",
         title:
           firstString(
             reportObject.title,
             reportObject.name,
-            "Research Report",
-          ),
-        status: "complete",
-        content: reportContent,
+          ) ||
+          "Research Report",
+        content,
+        status:
+          "complete" as ReportSectionStatus,
         lastUpdated:
           firstString(
+            reportObject.lastUpdated,
+            reportObject.last_updated,
             reportObject.updatedAt,
             reportObject.updated_at,
           ) || undefined,
@@ -1006,231 +1019,203 @@ function normalizeReport(
     }
   }
 
+  /* ---------------------------------------------------------------------- */
+  /* Fallback report                                                        */
+  /* ---------------------------------------------------------------------- */
+
+  if (
+    sections.length === 0 &&
+    fallback?.sections?.length
+  ) {
+    return fallback;
+  }
+
   return {
+    ...(reportObject ?? {}),
+
     title:
       firstString(
-        reportObject.title,
-        reportObject.name,
-        root.reportTitle,
-        root.report_title,
-      ) || null,
+        reportObject?.title,
+        reportObject?.name,
+      ) ||
+      "Research Report",
 
     sections,
   };
 }
 
-/* -------------------------------------------------------------------------- */
-/* Overview normalization                                                     */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
+/* Overview                                                                   */
+/* ========================================================================== */
 
 function normalizeOverview(
-  root: Record<string, unknown>,
+  raw: unknown,
 ): ResearchResult["overview"] {
-  const overview =
-    getObject(
-      root.overview,
-      root.companyProfile,
-      root.company_profile,
-    ) ?? {};
+  const root =
+    isObject(raw)
+      ? raw
+      : {};
 
   const profile =
     getObject(
-      overview.profile,
       root.profile,
       root.company,
-      root.companyProfile,
       root.company_profile,
+      root.companyProfile,
     );
 
   const market =
     getObject(
-      overview.market,
       root.market,
-      root.marketData,
       root.market_data,
+      root.marketData,
     );
 
   const financials =
     getObject(
-      overview.financials,
       root.financials,
       root.financial,
-      root.financialData,
       root.financial_data,
+      root.financialData,
     );
 
-  return {
-    profile: profile
-      ? {
-          ...profile,
+  const profileResult = {
+    ...(profile ?? {}),
 
-          name:
-            firstString(
-              profile.name,
-              root.companyName,
-              root.company_name,
-            ) || null,
+    name:
+      firstString(
+        profile?.name,
+        profile?.company_name,
+        profile?.companyName,
+        root.company_name,
+        root.companyName,
+      ) || null,
 
-          ticker:
-            firstString(
-              profile.ticker,
-              root.ticker,
-              root.symbol,
-            ) || null,
+    ticker:
+      firstString(
+        profile?.ticker,
+        profile?.symbol,
+        root.ticker,
+        root.symbol,
+      ) || null,
 
-          description:
-            firstString(
-              profile.description,
-              profile.summary,
-              profile.about,
-            ) || null,
+    sector:
+      firstString(
+        profile?.sector,
+        root.sector,
+      ) || null,
 
-          sector:
-            firstString(
-              profile.sector,
-            ) || null,
+    industry:
+      firstString(
+        profile?.industry,
+        root.industry,
+      ) || null,
 
-          industry:
-            firstString(
-              profile.industry,
-            ) || null,
+    employees:
+      firstScalar(
+        profile?.employees,
+        profile?.employee_count,
+        profile?.employeeCount,
+      ),
 
-          headquarters:
-            firstString(
-              profile.headquarters,
-              profile.location,
-            ) || null,
-
-          ceo:
-            firstString(
-              profile.ceo,
-              profile.chief_executive,
-              profile.chiefExecutive,
-            ) || null,
-
-          employees:
-            firstDefined(
-              profile.employees,
-              profile.employeeCount,
-              profile.employee_count,
-            ) ?? null,
-
-          founded:
-            firstDefined(
-              profile.founded,
-              profile.foundedYear,
-              profile.founded_year,
-            ) ?? null,
-
-          website:
-            firstString(
-              profile.website,
-              profile.url,
-            ) || null,
-        }
-      : null,
-
-    market: market
-      ? {
-          ...market,
-
-          marketCap:
-            firstDefined(
-              market.marketCap,
-              market.market_cap,
-            ) ?? null,
-
-          sharePrice:
-            firstDefined(
-              market.sharePrice,
-              market.share_price,
-              market.currentPrice,
-              market.current_price,
-            ) ?? null,
-
-          peRatio:
-            firstDefined(
-              market.peRatio,
-              market.pe_ratio,
-              market.pe,
-            ) ?? null,
-
-          weekRange52:
-            firstString(
-              market.weekRange52,
-              market.week_range_52,
-              market.fiftyTwoWeekRange,
-              market.fifty_two_week_range,
-            ) || null,
-
-          dividendYield:
-            firstDefined(
-              market.dividendYield,
-              market.dividend_yield,
-            ) ?? null,
-
-          beta:
-            firstDefined(
-              market.beta,
-            ) ?? null,
-        }
-      : null,
-
-    financials: financials
-      ? {
-          ...financials,
-
-          revenue:
-            firstDefined(
-              financials.revenue,
-            ) ?? null,
-
-          revenueGrowth:
-            firstDefined(
-              financials.revenueGrowth,
-              financials.revenue_growth,
-            ) ?? null,
-
-          grossMargin:
-            firstDefined(
-              financials.grossMargin,
-              financials.gross_margin,
-            ) ?? null,
-
-          operatingMargin:
-            firstDefined(
-              financials.operatingMargin,
-              financials.operating_margin,
-            ) ?? null,
-
-          eps:
-            firstDefined(
-              financials.eps,
-            ) ?? null,
-        }
-      : null,
+    founded:
+      firstScalar(
+        profile?.founded,
+        profile?.founded_year,
+        profile?.foundedYear,
+      ),
   };
+
+  const marketResult = {
+    ...(market ?? {}),
+
+    marketCap:
+      firstScalar(
+        market?.marketCap,
+        market?.market_cap,
+        market?.marketCapitalization,
+      ),
+
+    sharePrice:
+      firstScalar(
+        market?.sharePrice,
+        market?.share_price,
+        market?.price,
+      ),
+
+    peRatio:
+      firstScalar(
+        market?.peRatio,
+        market?.pe_ratio,
+        market?.pe,
+      ),
+
+    dividendYield:
+      firstScalar(
+        market?.dividendYield,
+        market?.dividend_yield,
+      ),
+
+    beta:
+      firstScalar(
+        market?.beta,
+      ),
+  };
+
+  const financialsResult = {
+    ...(financials ?? {}),
+
+    revenue:
+      firstScalar(
+        financials?.revenue,
+        financials?.sales,
+      ),
+
+    revenueGrowth:
+      firstScalar(
+        financials?.revenueGrowth,
+        financials?.revenue_growth,
+      ),
+
+    grossMargin:
+      firstScalar(
+        financials?.grossMargin,
+        financials?.gross_margin,
+      ),
+
+    operatingMargin:
+      firstScalar(
+        financials?.operatingMargin,
+        financials?.operating_margin,
+      ),
+
+    eps:
+      firstScalar(
+        financials?.eps,
+        financials?.earnings_per_share,
+      ),
+  };
+
+  return {
+    ...(isObject(raw) ? raw : {}),
+    profile: profileResult,
+    market: marketResult,
+    financials: financialsResult,
+  } as ResearchResult["overview"];
 }
 
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
 /* Research normalization                                                     */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
 
 function normalizeResearchResult(
   raw: unknown,
-  fallback?: ResearchResult | null,
-  requestedId?: string | number,
+  existing?: ResearchResult | null,
+  requestedId?: string,
 ): ResearchResult {
   const root =
     unwrapResearchResponse(raw);
 
-  const existing =
-    fallback ?? null;
-
-  /*
-   * These objects are intentionally collected from several possible
-   * backend locations.
-   */
   const nestedResearch =
     getObject(
       root.research,
@@ -1242,14 +1227,12 @@ function normalizeResearchResult(
     getObject(
       root.analysis,
       nestedResearch?.analysis,
-      root.analyses,
     );
 
   const findings =
     getObject(
       root.findings,
       nestedResearch?.findings,
-      analysis?.findings,
     );
 
   const metadata =
@@ -1258,407 +1241,130 @@ function normalizeResearchResult(
       nestedResearch?.metadata,
     );
 
-  const summaryObject =
+  const summary =
     getObject(
       root.summary,
       nestedResearch?.summary,
     );
 
-  /* ------------------------------------------------------------------------ */
-  /* Evidence                                                                 */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Evidence                                                               */
+  /* ---------------------------------------------------------------------- */
 
-  const explicitEvidence =
+  const evidenceRaw =
     firstNonEmptyArray(
       root.evidence,
-      root.evidenceItems,
       root.evidence_items,
-
-      nestedResearch?.evidence,
-      nestedResearch?.evidenceItems,
-      nestedResearch?.evidence_items,
-
+      root.evidenceItems,
       analysis?.evidence,
-      analysis?.evidenceItems,
-      analysis?.evidence_items,
-
       findings?.evidence,
-      findings?.evidenceItems,
-      findings?.evidence_items,
-
-      metadata?.evidence,
-    );
-
-  const recursiveEvidence =
-    findFirstNonEmptyArrayByKeys(
-      root,
-      [
-        "evidence",
-        "evidenceItems",
-        "evidence_items",
-      ],
-    );
-
-  const rawEvidence =
-    explicitEvidence.length > 0
-      ? explicitEvidence
-      : recursiveEvidence;
-
-  const normalizedEvidence =
-    normalizeEvidence(
-      rawEvidence,
+      nestedResearch?.evidence,
     );
 
   const evidence =
-    normalizedEvidence.length > 0
-      ? normalizedEvidence
+    normalizeEvidence(
+      evidenceRaw,
+    );
+
+  const normalizedEvidence =
+    evidence.length > 0
+      ? evidence
       : existing?.evidence ?? [];
 
-  /* ------------------------------------------------------------------------ */
-  /* Documents                                                                */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Documents                                                              */
+  /* ---------------------------------------------------------------------- */
 
-  const explicitDocuments =
+  const documentsRaw =
     firstNonEmptyArray(
       root.documents,
-      root.sourceDocuments,
-      root.source_documents,
+      root.docs,
       root.sources,
-
       nestedResearch?.documents,
-      nestedResearch?.sourceDocuments,
-      nestedResearch?.source_documents,
-
-      metadata?.documents,
-    );
-
-  const recursiveDocuments =
-    findFirstNonEmptyArrayByKeys(
-      root,
-      [
-        "documents",
-        "sourceDocuments",
-        "source_documents",
-      ],
-    );
-
-  const rawDocuments =
-    explicitDocuments.length > 0
-      ? explicitDocuments
-      : recursiveDocuments;
-
-  const normalizedDocuments =
-    normalizeDocuments(
-      rawDocuments,
+      nestedResearch?.docs,
     );
 
   const documents =
-    normalizedDocuments.length > 0
-      ? normalizedDocuments
+    normalizeDocuments(
+      documentsRaw,
+    );
+
+  const normalizedDocuments =
+    documents.length > 0
+      ? documents
       : existing?.documents ?? [];
 
-  /* ------------------------------------------------------------------------ */
-  /* Insights                                                                 */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Insights                                                               */
+  /* ---------------------------------------------------------------------- */
 
-  /*
-   * This is intentionally much broader than the previous implementation.
-   *
-   * Supported shapes include:
-   *
-   * analysis.insights
-   * analysis.keyFindings
-   * analysis.findings
-   * findings.insights
-   * findings.items
-   * summary.insights
-   * research.insights
-   * root.insights
-   *
-   * and recursive equivalents.
-   */
-  const explicitInsights =
+  const insightsRaw =
     firstNonEmptyArray(
       root.insights,
-      root.insightItems,
-      root.insight_items,
-      root.keyInsights,
       root.key_insights,
-      root.keyFindings,
-      root.key_findings,
-
-      nestedResearch?.insights,
-      nestedResearch?.insightItems,
-      nestedResearch?.insight_items,
-      nestedResearch?.keyInsights,
-      nestedResearch?.key_insights,
-      nestedResearch?.keyFindings,
-      nestedResearch?.key_findings,
-
+      root.keyInsights,
       analysis?.insights,
-      analysis?.insightsItems,
-      analysis?.insight_items,
-      analysis?.keyFindings,
-      analysis?.key_findings,
-      analysis?.keyInsights,
-      analysis?.key_insights,
-      analysis?.findings,
-      analysis?.items,
-      analysis?.results,
-
       findings?.insights,
-      findings?.keyFindings,
-      findings?.key_findings,
-      findings?.keyInsights,
-      findings?.key_insights,
-      findings?.items,
-      findings?.results,
-
-      summaryObject?.insights,
-      summaryObject?.keyFindings,
-      summaryObject?.key_findings,
-      summaryObject?.keyInsights,
-      summaryObject?.key_insights,
-
-      metadata?.insights,
-    );
-
-  const recursiveInsights =
-    findFirstNonEmptyArrayByKeys(
-      root,
-      [
-        "insights",
-        "insightItems",
-        "insight_items",
-        "keyInsights",
-        "key_insights",
-        "keyFindings",
-        "key_findings",
-      ],
-    );
-
-  /*
-   * If an explicit location contains an empty array but another nested
-   * location has real insights, use the nested location.
-   */
-  const rawInsights =
-    explicitInsights.length > 0
-      ? explicitInsights
-      : recursiveInsights;
-
-  const normalizedInsights =
-    normalizeInsights(
-      rawInsights,
+      nestedResearch?.insights,
     );
 
   const insights =
-    normalizedInsights.length > 0
-      ? normalizedInsights
+    normalizeInsights(
+      insightsRaw,
+    );
+
+  const normalizedInsights =
+    insights.length > 0
+      ? insights
       : existing?.insights ?? [];
 
-  /* ------------------------------------------------------------------------ */
-  /* Stages                                                                   */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Stages                                                                 */
+  /* ---------------------------------------------------------------------- */
 
-  const explicitStages =
+  const stagesRaw =
     firstNonEmptyArray(
       root.stages,
-      root.steps,
-      root.pipeline,
-
+      root.pipeline_stages,
+      root.pipelineStages,
+      root.execution_stages,
+      root.executionStages,
       nestedResearch?.stages,
-      nestedResearch?.steps,
-      nestedResearch?.pipeline,
-
-      metadata?.stages,
-    );
-
-  const recursiveStages =
-    findFirstNonEmptyArrayByKeys(
-      root,
-      [
-        "stages",
-        "steps",
-        "pipeline",
-      ],
-    );
-
-  const rawStages =
-    explicitStages.length > 0
-      ? explicitStages
-      : recursiveStages;
-
-  const normalizedStages =
-    normalizeStages(
-      rawStages,
     );
 
   const stages =
-    normalizedStages.length > 0
-      ? normalizedStages
+    normalizeStages(
+      stagesRaw,
+    );
+
+  const normalizedStages =
+    stages.length > 0
+      ? stages
       : existing?.stages ?? [];
 
-  /* ------------------------------------------------------------------------ */
-  /* IDs                                                                      */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Overview                                                               */
+  /* ---------------------------------------------------------------------- */
 
-  const id =
-    firstString(
-      root.id,
-      root.researchId,
-      root.research_id,
-
-      nestedResearch?.id,
-      nestedResearch?.researchId,
-      nestedResearch?.research_id,
-
-      existing?.id,
-      existing?.researchId,
-
-      requestedId,
-    ) || null;
-
-  const canonicalResearchId =
-    firstString(
-      root.researchId,
-      root.research_id,
-
-      nestedResearch?.researchId,
-      nestedResearch?.research_id,
-
-      root.id,
-      nestedResearch?.id,
-
-      existing?.researchId,
-      existing?.id,
-
-      requestedId,
-    ) || null;
-
-  /* ------------------------------------------------------------------------ */
-  /* Basic fields                                                             */
-  /* ------------------------------------------------------------------------ */
-
-  const title =
-    firstString(
-      root.title,
-      root.name,
-
-      nestedResearch?.title,
-      nestedResearch?.name,
-
-      existing?.title,
-    ) || null;
-
-  const companyName =
-    firstString(
-      root.companyName,
-      root.company_name,
-
-      nestedResearch?.companyName,
-      nestedResearch?.company_name,
-
-      root.company,
-
-      existing?.companyName,
-    ) || null;
-
-  const ticker =
-    firstString(
-      root.ticker,
-      root.symbol,
-
-      nestedResearch?.ticker,
-      nestedResearch?.symbol,
-
-      existing?.ticker,
-    ) || null;
-
-  const status =
-    firstString(
-      root.status,
-      root.state,
-
-      nestedResearch?.status,
-      nestedResearch?.state,
-
-      existing?.status,
-    ) || null;
-
-  const summary =
-    firstString(
-      typeof root.summary ===
-      "string"
-        ? root.summary
-        : undefined,
-
-      root.description,
-
-      nestedResearch?.summary,
-
-      nestedResearch?.description,
-
-      summaryObject?.text,
-      summaryObject?.content,
-      summaryObject?.description,
-
-      existing?.summary,
-    ) || null;
-
-  const createdAt =
-    firstString(
-      root.createdAt,
-      root.created_at,
-
-      nestedResearch?.createdAt,
-      nestedResearch?.created_at,
-
-      existing?.createdAt,
-    ) || null;
-
-  const updatedAt =
-    firstString(
-      root.updatedAt,
-      root.updated_at,
-
-      nestedResearch?.updatedAt,
-      nestedResearch?.updated_at,
-
-      existing?.updatedAt,
-    ) || null;
-
-  /* ------------------------------------------------------------------------ */
-  /* Overview                                                                 */
-  /* ------------------------------------------------------------------------ */
-
-  const hasOverviewData =
-    Boolean(
-      root.overview ||
-      root.profile ||
-      root.company ||
-      root.companyProfile ||
-      root.company_profile ||
-      root.market ||
-      root.marketData ||
-      root.market_data ||
-      root.financials ||
-      root.financial ||
-      root.financialData ||
-      root.financial_data,
+  const overviewSource =
+    firstDefined(
+      root.overview,
+      root.company_overview,
+      root.companyOverview,
+      nestedResearch?.overview,
+      existing?.overview,
     );
 
   const overview =
-    hasOverviewData
-      ? normalizeOverview(root)
-      : existing?.overview ?? {
-          profile: null,
-          market: null,
-          financials: null,
-        };
+    overviewSource !== undefined
+      ? normalizeOverview(
+          overviewSource,
+        )
+      : existing?.overview ?? null;
 
-  /* ------------------------------------------------------------------------ */
-  /* Report                                                                   */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Report                                                                 */
+  /* ---------------------------------------------------------------------- */
 
   const reportSource =
     firstDefined(
@@ -1670,307 +1376,231 @@ function normalizeResearchResult(
       nestedResearch?.research_report,
     );
 
-  const normalizedReport =
-    normalizeReport(
-      reportSource,
-      root,
-    );
+  const report =
+    reportSource !== undefined
+      ? normalizeReport(
+          reportSource,
+          existing?.report,
+        )
+      : existing?.report ?? null;
 
-  const report = {
-    title:
-      normalizedReport.title ??
-      existing?.report?.title ??
-      null,
+  /* ---------------------------------------------------------------------- */
+  /* Basic fields                                                           */
+  /* ---------------------------------------------------------------------- */
 
-    sections:
-      normalizedReport.sections
-        .length > 0
-        ? normalizedReport.sections
-        : existing?.report?.sections ??
-          [],
-  };
+  const id =
+    firstString(
+      root.id,
+      root.researchId,
+      root.research_id,
+      nestedResearch?.id,
+      nestedResearch?.researchId,
+      existing?.id,
+      existing?.researchId,
+      requestedId,
+    ) ||
+    requestedId ||
+    "";
 
-  /* ------------------------------------------------------------------------ */
-  /* Metadata                                                                 */
-  /* ------------------------------------------------------------------------ */
+  const researchId =
+    firstString(
+      root.researchId,
+      root.research_id,
+      nestedResearch?.researchId,
+      nestedResearch?.research_id,
+      existing?.researchId,
+      id,
+    ) || null;
 
-  const normalizedMetadata =
-    metadata ??
-    existing?.metadata ??
-    null;
+  const companyName =
+    firstString(
+      root.companyName,
+      root.company_name,
+      nestedResearch?.companyName,
+      nestedResearch?.company_name,
+      existing?.companyName,
+    ) || null;
 
-  /* ------------------------------------------------------------------------ */
-  /* Return                                                                   */
-  /* ------------------------------------------------------------------------ */
+  const title =
+    firstString(
+      root.title,
+      root.name,
+      nestedResearch?.title,
+      nestedResearch?.name,
+      existing?.title,
+    ) || null;
+
+  const status =
+    firstString(
+      root.status,
+      root.state,
+      nestedResearch?.status,
+      nestedResearch?.state,
+      existing?.status,
+    ) || "";
+
+  const createdAt =
+    firstString(
+      root.createdAt,
+      root.created_at,
+      nestedResearch?.createdAt,
+      nestedResearch?.created_at,
+      existing?.createdAt,
+    ) || null;
 
   return {
-    /*
-     * Keep all backend fields.
-     */
+    ...(existing ?? {}),
     ...root,
 
-    /*
-     * Keep existing workspace fields.
-     */
-    ...(existing ?? {}),
-
-    /*
-     * Canonical normalized fields.
-     */
     id,
-
-    researchId:
-      canonicalResearchId,
-
-    title,
-
+    researchId,
     companyName,
-
-    ticker,
-
+    title,
     status,
+    createdAt,
 
-    summary,
+    evidence:
+      normalizedEvidence,
+
+    documents:
+      normalizedDocuments,
+
+    insights:
+      normalizedInsights,
+
+    stages:
+      normalizedStages,
 
     overview,
 
-    stages,
-
-    evidence,
-
-    documents,
-
-    insights,
-
     report,
 
-    createdAt,
-
-    updatedAt,
-
     metadata:
-      normalizedMetadata,
-  };
+      metadata ??
+      existing?.metadata ??
+      null,
+
+    summary:
+      summary ??
+      existing?.summary ??
+      null,
+  } as ResearchResult;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Status extraction                                                          */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
+/* Extraction helpers                                                         */
+/* ========================================================================== */
 
 function extractStatus(
-  value: unknown,
+  raw: unknown,
+  result?: ResearchResult | null,
 ): string {
-  if (!isObject(value)) {
-    return "";
-  }
-
-  const result =
-    isObject(value.result)
-      ? value.result
-      : null;
-
-  const data =
-    isObject(value.data)
-      ? value.data
-      : null;
-
-  const research =
-    isObject(value.research)
-      ? value.research
-      : null;
+  const root =
+    unwrapResearchResponse(raw);
 
   return firstString(
-    value.status,
-    value.state,
-    value.researchStatus,
-    value.research_status,
-
+    root.status,
+    root.state,
     result?.status,
-    result?.state,
-
-    data?.status,
-    data?.state,
-
-    research?.status,
-    research?.state,
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* Progress extraction                                                        */
-/* -------------------------------------------------------------------------- */
-
 function extractProgress(
-  value: unknown,
+  raw: unknown,
+  result?: ResearchResult | null,
 ): number {
-  if (!isObject(value)) {
-    return 0;
-  }
-
-  const result =
-    isObject(value.result)
-      ? value.result
-      : null;
-
-  const data =
-    isObject(value.data)
-      ? value.data
-      : null;
-
-  const research =
-    isObject(value.research)
-      ? value.research
-      : null;
+  const root =
+    unwrapResearchResponse(raw);
 
   const progress =
     firstNumber(
-      value.progress,
-      value.progressPercent,
-      value.progress_percent,
-      value.percentage,
-      value.percent,
-
-      result?.progress,
-      result?.progressPercent,
-      result?.progress_percent,
-
-      data?.progress,
-      data?.progressPercent,
-      data?.progress_percent,
-
-      research?.progress,
-      research?.progressPercent,
-      research?.progress_percent,
+      root.progress,
+      root.percent,
+      root.percentage,
+      root.progress_percent,
+      root.progressPercent,
     );
 
-  return Math.min(
-    100,
-    Math.max(
-      0,
-      progress ?? 0,
-    ),
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Stage extraction                                                           */
-/* -------------------------------------------------------------------------- */
-
-function extractStages(
-  value: unknown,
-): ResearchStageInfo[] {
-  if (!isObject(value)) {
-    return [];
+  if (progress !== null) {
+    return Math.min(
+      100,
+      Math.max(0, progress),
+    );
   }
 
-  const raw =
-    findFirstNonEmptyArrayByKeys(
-      value,
-      [
-        "stages",
-        "steps",
-        "pipeline",
-      ],
+  if (
+    result?.stages &&
+    result.stages.length > 0
+  ) {
+    return Math.max(
+      ...result.stages.map(
+        (stage) =>
+          safeNumber(
+            stage.progress,
+            0,
+          ),
+      ),
+    );
+  }
+
+  return 0;
+}
+
+function extractStages(
+  raw: unknown,
+  result?: ResearchResult | null,
+): ResearchStageInfo[] {
+  const root =
+    unwrapResearchResponse(raw);
+
+  const stagesRaw =
+    firstNonEmptyArray(
+      root.stages,
+      root.pipeline_stages,
+      root.pipelineStages,
+      root.execution_stages,
+      root.executionStages,
+      result?.stages,
     );
 
   return normalizeStages(
-    raw,
+    stagesRaw,
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/* Current stage extraction                                                   */
-/* -------------------------------------------------------------------------- */
 
 function extractCurrentStage(
-  value: unknown,
+  raw: unknown,
+  result?: ResearchResult | null,
 ): string {
-  if (!isObject(value)) {
-    return "";
-  }
-
-  const result =
-    isObject(value.result)
-      ? value.result
-      : null;
-
-  const data =
-    isObject(value.data)
-      ? value.data
-      : null;
-
-  const research =
-    isObject(value.research)
-      ? value.research
-      : null;
+  const root =
+    unwrapResearchResponse(raw);
 
   return firstString(
-    value.currentStage,
-    value.current_stage,
-    value.stage,
-    value.currentStep,
-    value.current_step,
-
+    root.currentStage,
+    root.current_stage,
+    root.activeStage,
+    root.active_stage,
     result?.currentStage,
-    result?.current_stage,
-    result?.stage,
-
-    data?.currentStage,
-    data?.current_stage,
-    data?.stage,
-
-    research?.currentStage,
-    research?.current_stage,
-    research?.stage,
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/* Created-at extraction                                                      */
-/* -------------------------------------------------------------------------- */
 
 function extractCreatedAt(
-  value: unknown,
+  raw: unknown,
 ): string {
-  if (!isObject(value)) {
-    return "";
-  }
-
-  const research =
-    isObject(value.research)
-      ? value.research
-      : null;
-
-  const result =
-    isObject(value.result)
-      ? value.result
-      : null;
-
-  const data =
-    isObject(value.data)
-      ? value.data
-      : null;
+  const root =
+    unwrapResearchResponse(raw);
 
   return firstString(
-    value.createdAt,
-    value.created_at,
-
-    research?.createdAt,
-    research?.created_at,
-
-    result?.createdAt,
-    result?.created_at,
-
-    data?.createdAt,
-    data?.created_at,
+    root.createdAt,
+    root.created_at,
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* Research Page                                                              */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
+/* Page                                                                       */
+/* ========================================================================== */
 
-function ResearchPage({
+export function ResearchPage({
   researchId,
   data: initialData = null,
 }: ResearchPageProps) {
@@ -1985,7 +1615,9 @@ function ResearchPage({
     );
 
   const [error, setError] =
-    useState<string | null>(null);
+    useState<string | null>(
+      null,
+    );
 
   const [status, setStatus] =
     useState<string>(
@@ -1993,19 +1625,24 @@ function ResearchPage({
     );
 
   const [progress, setProgress] =
-    useState<number>(
-      initialData?.stages?.length
-        ? Math.max(
-            ...initialData.stages.map(
-              (stage) =>
-                safeNumber(
-                  stage.progress,
-                  0,
-                ),
-            ),
-          )
-        : 0,
-    );
+    useState<number>(() => {
+      if (
+        initialData?.stages &&
+        initialData.stages.length > 0
+      ) {
+        return Math.max(
+          ...initialData.stages.map(
+            (stage) =>
+              safeNumber(
+                stage.progress,
+                0,
+              ),
+          ),
+        );
+      }
+
+      return 0;
+    });
 
   const [currentStage, setCurrentStage] =
     useState<string>("");
@@ -2023,19 +1660,15 @@ function ResearchPage({
       typeof setTimeout
     > | null>(null);
 
-  /* ------------------------------------------------------------------------ */
-  /* Canonical ID                                                             */
-  /* ------------------------------------------------------------------------ */
-
   const canonicalResearchId =
     resolveResearchId(
       researchId,
-      data,
+      data ?? initialData,
     );
 
-  /* ------------------------------------------------------------------------ */
-  /* Poll cleanup                                                             */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Poll timer                                                             */
+  /* ---------------------------------------------------------------------- */
 
   const clearPollTimer =
     useCallback(() => {
@@ -2044,13 +1677,14 @@ function ResearchPage({
           pollTimer.current,
         );
 
-        pollTimer.current = null;
+        pollTimer.current =
+          null;
       }
     }, []);
 
-  /* ------------------------------------------------------------------------ */
-  /* Load research                                                            */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Load research                                                          */
+  /* ---------------------------------------------------------------------- */
 
   const loadResearch =
     useCallback(
@@ -2064,12 +1698,10 @@ function ResearchPage({
           );
 
         if (!id) {
-          setError(
-            "A valid research ID is required.",
-          );
-
           setLoading(false);
-
+          setError(
+            "No research ID was provided.",
+          );
           return;
         }
 
@@ -2084,112 +1716,157 @@ function ResearchPage({
 
         if (!silent) {
           setLoading(true);
+          setError(null);
         }
-
-        setError(null);
 
         try {
           const raw =
             await getResearch(id);
 
-          const previousData =
-            data ?? initialData;
-
           const normalized =
             normalizeResearchResult(
               raw,
-              previousData,
+              data ?? initialData,
               id,
             );
 
-          setData(
-            normalized,
-          );
+          setData(normalized);
 
           const resultStatus =
-            extractStatus(raw);
+            extractStatus(
+              raw,
+              normalized,
+            );
 
           const resultProgress =
-            extractProgress(raw);
+            extractProgress(
+              raw,
+              normalized,
+            );
 
           const resultStages =
-            extractStages(raw);
+            extractStages(
+              raw,
+              normalized,
+            );
 
           const resultCurrentStage =
-            extractCurrentStage(raw);
-
-          if (resultStatus) {
-            setStatus(
-              resultStatus,
+            extractCurrentStage(
+              raw,
+              normalized,
             );
-          }
 
-          if (
-            resultProgress > 0
-          ) {
-            setProgress(
-              resultProgress,
-            );
-          }
+          setStatus(
+            resultStatus,
+          );
 
-          if (
-            resultStages.length > 0
-          ) {
-            setStages(
-              resultStages,
-            );
-          }
+          setProgress(
+            resultProgress,
+          );
 
-          if (
-            resultCurrentStage
-          ) {
-            setCurrentStage(
-              resultCurrentStage,
-            );
-          }
+          setStages(
+            resultStages,
+          );
 
-          /*
-           * If the actual result is already complete,
-           * don't perform another status request.
-           */
+          setCurrentStage(
+            resultCurrentStage,
+          );
+
+          /* -------------------------------------------------------------- */
+          /* Completed                                                       */
+          /* -------------------------------------------------------------- */
+
           if (
             isFinishedStatus(
               resultStatus,
             )
           ) {
             setProgress(100);
-            setLoading(false);
 
+            const missingCompletedData =
+              normalized.insights
+                .length === 0 ||
+              normalized.evidence
+                .length === 0 ||
+              !normalized.report ||
+              normalized.report.sections
+                .length === 0;
+
+            if (
+              missingCompletedData
+            ) {
+              try {
+                const completedRaw =
+                  await getResearch(id);
+
+                const completed =
+                  normalizeResearchResult(
+                    completedRaw,
+                    normalized,
+                    id,
+                  );
+
+                setData(
+                  completed,
+                );
+
+                setStatus(
+                  extractStatus(
+                    completedRaw,
+                    completed,
+                  ) ||
+                    resultStatus,
+                );
+
+                setProgress(100);
+
+                setStages(
+                  extractStages(
+                    completedRaw,
+                    completed,
+                  ),
+                );
+
+                setCurrentStage(
+                  extractCurrentStage(
+                    completedRaw,
+                    completed,
+                  ),
+                );
+              } catch {
+                // Keep current completed result.
+              }
+            }
+
+            setLoading(false);
             return;
           }
+
+          /* -------------------------------------------------------------- */
+          /* Failed                                                          */
+          /* -------------------------------------------------------------- */
 
           if (
             isFailedStatus(
               resultStatus,
             )
           ) {
-            setLoading(false);
-
             setError(
               firstString(
-                isObject(raw)
-                  ? raw.error
-                  : undefined,
-
-                isObject(raw)
-                  ? raw.message
-                  : undefined,
-
-                "Research failed.",
+                normalized.error,
+                normalized.errorMessage,
+                "Research execution failed.",
               ),
             );
 
+            setLoading(false);
             return;
           }
 
-          /*
-           * Status endpoint is supplementary.
-           */
+          /* -------------------------------------------------------------- */
+          /* Status endpoint                                                 */
+          /* -------------------------------------------------------------- */
+
           try {
             const statusRaw =
               await getResearchStatus(
@@ -2199,33 +1876,39 @@ function ResearchPage({
             const statusValue =
               extractStatus(
                 statusRaw,
+                normalized,
               );
 
             const statusProgress =
               extractProgress(
                 statusRaw,
+                normalized,
               );
 
             const statusStages =
               extractStages(
                 statusRaw,
+                normalized,
               );
 
             const statusCurrentStage =
               extractCurrentStage(
                 statusRaw,
+                normalized,
               );
 
-            if (statusValue) {
-              setStatus(
-                statusValue,
-              );
-            }
+            setStatus(
+              statusValue ||
+                resultStatus,
+            );
 
             setProgress(
-              Math.max(
-                resultProgress,
-                statusProgress,
+              Math.min(
+                100,
+                Math.max(
+                  0,
+                  statusProgress,
+                ),
               ),
             );
 
@@ -2252,22 +1935,55 @@ function ResearchPage({
             ) {
               setProgress(100);
 
-              /*
-               * Fetch the completed research again so that
-               * insights, evidence and report are available.
-               */
-              if (
+              const missingCompletedData =
                 normalized.insights
-                  ?.length === 0 ||
+                  .length === 0 ||
                 normalized.evidence
-                  ?.length === 0 ||
-                normalized.report
-                  ?.sections?.length === 0
+                  .length === 0 ||
+                !normalized.report ||
+                normalized.report.sections
+                  .length === 0;
+
+              if (
+                missingCompletedData
               ) {
-                await loadResearch(
-                  true,
-                );
+                try {
+                  const completedRaw =
+                    await getResearch(
+                      id,
+                    );
+
+                  const completed =
+                    normalizeResearchResult(
+                      completedRaw,
+                      normalized,
+                      id,
+                    );
+
+                  setData(
+                    completed,
+                  );
+
+                  setStages(
+                    extractStages(
+                      completedRaw,
+                      completed,
+                    ),
+                  );
+
+                  setCurrentStage(
+                    extractCurrentStage(
+                      completedRaw,
+                      completed,
+                    ),
+                  );
+                } catch {
+                  // Keep current result.
+                }
               }
+
+              setLoading(false);
+              return;
             }
 
             if (
@@ -2276,59 +1992,35 @@ function ResearchPage({
               )
             ) {
               setError(
-                firstString(
-                  isObject(
-                    statusRaw,
-                  )
-                    ? statusRaw.error
-                    : undefined,
-
-                  isObject(
-                    statusRaw,
-                  )
-                    ? statusRaw.message
-                    : undefined,
-
-                  "Research failed.",
-                ),
+                "Research execution failed.",
               );
+
+              setLoading(false);
+              return;
+            }
+
+            if (
+              isActiveStatus(
+                statusValue,
+              )
+            ) {
+              setLoading(true);
             }
           } catch {
-            /*
-             * Status failure must never destroy the actual
-             * research result.
-             */
+            // Status endpoint failure should not discard valid research data.
           }
+        } catch (
+          requestError
+        ) {
+          const message =
+            requestError instanceof Error
+              ? requestError.message
+              : "Failed to load research.";
 
-          setLoading(false);
-        } catch (requestError) {
-          setLoading(false);
+          setError(message);
 
-          if (
-            data ||
-            initialData
-          ) {
-            setError(
-              firstString(
-                requestError instanceof
-                Error
-                  ? requestError.message
-                  : undefined,
-
-                "Unable to refresh research data.",
-              ),
-            );
-          } else {
-            setError(
-              firstString(
-                requestError instanceof
-                Error
-                  ? requestError.message
-                  : undefined,
-
-                "Unable to load research.",
-              ),
-            );
+          if (!silent) {
+            setLoading(false);
           }
         } finally {
           requestInFlight.current =
@@ -2342,9 +2034,9 @@ function ResearchPage({
       ],
     );
 
-  /* ------------------------------------------------------------------------ */
-  /* Reset when research ID changes                                           */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Reset                                                                  */
+  /* ---------------------------------------------------------------------- */
 
   useEffect(() => {
     clearPollTimer();
@@ -2353,35 +2045,36 @@ function ResearchPage({
       initialData,
     );
 
+    setError(null);
+
     setStatus(
       initialData?.status ?? "",
     );
 
-    setProgress(
-      initialData?.stages?.length
-        ? Math.max(
-            ...initialData.stages.map(
-              (stage) =>
-                safeNumber(
-                  stage.progress,
-                  0,
-                ),
-            ),
-          )
-        : 0,
-    );
+    setProgress(() => {
+      if (
+        initialData?.stages &&
+        initialData.stages.length > 0
+      ) {
+        return Math.max(
+          ...initialData.stages.map(
+            (stage) =>
+              safeNumber(
+                stage.progress,
+                0,
+              ),
+          ),
+        );
+      }
 
-    setCurrentStage("");
+      return 0;
+    });
 
     setStages(
       initialData?.stages ?? [],
     );
 
-    setError(null);
-
-    setLoading(
-      !initialData,
-    );
+    setCurrentStage("");
 
     requestInFlight.current =
       false;
@@ -2391,24 +2084,25 @@ function ResearchPage({
     clearPollTimer,
   ]);
 
-  /* ------------------------------------------------------------------------ */
-  /* Initial load                                                             */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Initial load                                                            */
+  /* ---------------------------------------------------------------------- */
 
   useEffect(() => {
     void loadResearch();
   }, [loadResearch]);
 
-  /* ------------------------------------------------------------------------ */
-  /* Poll research status                                                     */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Polling                                                                 */
+  /* ---------------------------------------------------------------------- */
 
   useEffect(() => {
     clearPollTimer();
 
-    if (
-      !canonicalResearchId
-    ) {
+    const id =
+      canonicalResearchId;
+
+    if (!id) {
       return;
     }
 
@@ -2419,132 +2113,100 @@ function ResearchPage({
       return;
     }
 
-    const shouldPoll =
-      loading ||
-      isActiveStatus(status) ||
-      !status;
-
-    if (!shouldPoll) {
-      return;
-    }
-
     pollTimer.current =
       setTimeout(
         async () => {
-          const id =
-            canonicalResearchId;
-
           try {
             const statusRaw =
               await getResearchStatus(
                 id,
               );
 
-            const nextStatus =
+            const statusValue =
               extractStatus(
                 statusRaw,
               );
 
-            const nextProgress =
+            const statusProgress =
               extractProgress(
                 statusRaw,
               );
 
-            const nextStages =
+            const statusStages =
               extractStages(
                 statusRaw,
               );
 
-            const nextCurrentStage =
+            const statusCurrentStage =
               extractCurrentStage(
                 statusRaw,
               );
 
-            if (nextStatus) {
-              setStatus(
-                nextStatus,
-              );
-            }
-
             if (
-              nextProgress > 0
+              statusValue
             ) {
-              setProgress(
-                nextProgress,
+              setStatus(
+                statusValue,
               );
             }
 
+            setProgress(
+              Math.min(
+                100,
+                Math.max(
+                  0,
+                  statusProgress,
+                ),
+              ),
+            );
+
             if (
-              nextStages.length > 0
+              statusStages.length > 0
             ) {
               setStages(
-                nextStages,
+                statusStages,
               );
             }
 
             if (
-              nextCurrentStage
+              statusCurrentStage
             ) {
               setCurrentStage(
-                nextCurrentStage,
+                statusCurrentStage,
               );
             }
 
             if (
               isFailedStatus(
-                nextStatus,
+                statusValue,
               )
             ) {
-              setLoading(false);
-
               setError(
-                firstString(
-                  isObject(
-                    statusRaw,
-                  )
-                    ? statusRaw.error
-                    : undefined,
-
-                  isObject(
-                    statusRaw,
-                  )
-                    ? statusRaw.message
-                    : undefined,
-
-                  "Research failed.",
-                ),
+                "Research execution failed.",
               );
 
+              setLoading(false);
               return;
             }
 
             if (
               isFinishedStatus(
-                nextStatus,
+                statusValue,
               )
             ) {
               setProgress(100);
 
-              /*
-               * Critical:
-               *
-               * When the status endpoint reports completion,
-               * fetch the complete research payload.
-               */
               await loadResearch(
                 true,
               );
 
               setLoading(false);
-
               return;
             }
 
             setLoading(true);
           } catch {
-            /*
-             * Polling failures are intentionally ignored.
-             */
+            // Continue polling after transient status errors.
           }
         },
         2500,
@@ -2559,9 +2221,9 @@ function ResearchPage({
     loadResearch,
   ]);
 
-  /* ------------------------------------------------------------------------ */
-  /* Derived workspace values                                                 */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Workspace values                                                       */
+  /* ---------------------------------------------------------------------- */
 
   const companyName =
     firstString(
@@ -2597,23 +2259,22 @@ function ResearchPage({
       data?.status,
     );
 
-  /* ------------------------------------------------------------------------ */
-  /* Error state                                                              */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Error state                                                             */
+  /* ---------------------------------------------------------------------- */
 
   if (
     error &&
-    !data &&
-    !loading
+    !data
   ) {
     return (
-      <div className="min-h-[400px] flex items-center justify-center px-6">
-        <div className="max-w-lg w-full rounded-lg border border-border bg-bg-surface p-6">
-          <div className="text-sm font-medium text-text-primary">
+      <div className="min-h-100 flex items-center justify-center px-6">
+        <div className="w-full max-w-xl rounded-xl border border-border bg-background p-6 text-center">
+          <h2 className="text-lg font-semibold text-text-primary">
             Unable to load research
-          </div>
+          </h2>
 
-          <p className="mt-2 text-xs leading-5 text-text-muted">
+          <p className="mt-2 text-sm text-text-secondary">
             {error}
           </p>
 
@@ -2622,7 +2283,7 @@ function ResearchPage({
             onClick={() => {
               void loadResearch();
             }}
-            className="mt-4 rounded-md border border-border bg-bg-elevated px-3 py-2 text-xs font-medium text-text-primary hover:bg-bg-hover transition-colors"
+            className="mt-5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
           >
             Retry
           </button>
@@ -2631,9 +2292,9 @@ function ResearchPage({
     );
   }
 
-  /* ------------------------------------------------------------------------ */
-  /* Research Workspace                                                       */
-  /* ------------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------------- */
+  /* Workspace                                                               */
+  /* ---------------------------------------------------------------------- */
 
   return (
     <ResearchWorkspace
@@ -2652,11 +2313,5 @@ function ResearchPage({
     />
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/* Exports                                                                    */
-/* -------------------------------------------------------------------------- */
-
-export { ResearchPage };
 
 export default ResearchPage;

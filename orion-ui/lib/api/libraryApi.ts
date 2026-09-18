@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   LibraryItem,
   LibraryListResponse,
 } from "@/types/library";
@@ -348,7 +348,7 @@ function normalizeLibraryItem(
         item,
         "title",
         "title",
-      ),
+      ) ?? "Untitled artifact",
 
     description:
       readField<string>(

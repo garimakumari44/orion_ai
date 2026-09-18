@@ -1,6 +1,6 @@
 import { Check, Loader, Clock, Pencil, Download } from 'lucide-react';
 import { cn } from '../../components/ui';
-import type { DraftSection } from '../type';
+import type { DraftSection } from "@/types";
 
 interface DraftTabProps {
   title: string;
@@ -91,3 +91,4 @@ export function DraftTab({ title, sections }: DraftTabProps) {
     </div>
   );
 }
+

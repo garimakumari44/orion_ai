@@ -1,4 +1,4 @@
-
+﻿
 'use client';
 
 import { useState } from 'react';
@@ -37,6 +37,7 @@ type Tab =
 
 interface WorkspacePageProps {
   data?: WorkspaceData | null;
+  researchId?: string | null;
 }
 
 /* ============================================================================
@@ -251,7 +252,7 @@ export function WorkspacePage({
                     companyName !== workspaceTitle &&
                     status && (
                       <span className="text-text-faint">
-                        ·
+                        Â·
                       </span>
                     )}
 
@@ -262,7 +263,7 @@ export function WorkspacePage({
                   {currentStage && (
                     <>
                       <span className="text-text-faint">
-                        ·
+                        Â·
                       </span>
 
                       <span className="shrink-0 text-xs text-text-muted">
@@ -411,10 +412,11 @@ export function WorkspacePage({
           {activeTab === 'analyst' && (
             <div className="h-full min-h-0 overflow-y-auto">
               <AnalystTab
+                agent={data.agent}
                 actions={data.agentActions ?? []}
                 stages={data.stages ?? []}
                 insights={data.insights ?? []}
-              />
+/>
             </div>
           )}
 
@@ -503,4 +505,7 @@ function EmptyState({
     </div>
   );
 }
+
+
+
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import {
   FileText,
   ExternalLink,
@@ -107,7 +107,7 @@ export function EvidenceTab({
             </div>
 
             <div className="font-mono text-2xl text-text-muted tabular-nums">
-              —
+              â€”
             </div>
           </div>
         </div>
@@ -129,7 +129,7 @@ export function EvidenceTab({
         {categories.map((category) => (
           <button
             key={category}
-            onClick={() => setFilter(category)}
+            onClick={() => category && setFilter(category)}
             className={cn(
               "px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap transition-colors",
               filter === category
@@ -168,7 +168,7 @@ export function EvidenceTab({
                   {item.filing && (
                     <>
                       <span className="text-text-faint">
-                        ·
+                        Â·
                       </span>
 
                       <span className="font-mono text-text-faint">
@@ -180,7 +180,7 @@ export function EvidenceTab({
                   {item.date && (
                     <>
                       <span className="text-text-faint">
-                        ·
+                        Â·
                       </span>
 
                       <span className="font-mono text-text-faint">
@@ -260,7 +260,7 @@ export function EvidenceTab({
           <div className="font-mono text-2xl text-text-primary tabular-nums">
             {averageConfidence !== null
               ? `${averageConfidence}%`
-              : "—"}
+              : "â€”"}
           </div>
         </div>
       </div>

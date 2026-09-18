@@ -1,3 +1,4 @@
+
 /**
  * Backend API Types
  *
@@ -270,6 +271,8 @@ export interface ApiFinancialStatementRow {
 
 /**
  * Financial market metrics returned by the financial agent.
+ *
+ * These are RAW backend fields and intentionally use snake_case.
  */
 export interface ApiFinancialMetrics {
   current_price?: number | null;
@@ -1100,3 +1103,4 @@ export interface PaginatedResponse<T> {
 
   pages?: number;
 }
+

@@ -1,63 +1,143 @@
-export type SaveDestination =
+/* -------------------------------------------------------------------------- */
+/* Saved Artifacts                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+
+* Where a saved artifact is stored/displayed.
+  */
+  export type SaveDestination =
   | "library"
   | "research"
   | "reports";
 
-export interface SavedArtifact {
+/* -------------------------------------------------------------------------- */
+/* Saved Artifact                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+
+* Canonical frontend representation of a saved artifact.
+*
+* The backend currently uses integer research IDs in PostgreSQL, while the
+* frontend/API layer also supports UUID/string research identifiers.
+*
+* Therefore both snake_case API fields and the normalized camelCase research
+* identifier are supported at the type boundary.
+  */
+  export interface SavedArtifact {
   id: string;
 
-  /**
-   * Research.id is an INTEGER in PostgreSQL.
-   */
-  research_id: number;
+/**
 
-  destination: SaveDestination;
+* Backend/API research identifier.
+*
+* Supports:
+* * PostgreSQL integer IDs
+* * UUID/string IDs
+    */
+    research_id: string | number;
 
-  title: string;
+/**
 
-  description?: string | null;
+* Normalized frontend research identifier.
+*
+* API mappers may expose this field for UI components that use camelCase.
+  */
+  researchId?: string | number | null;
 
-  created_at: string;
+destination: SaveDestination;
 
-  updated_at?: string | null;
+title: string;
+
+description?: string | null;
+
+created_at: string;
+
+updated_at?: string | null;
 }
 
-export interface SaveArtifactRequest {
+/* -------------------------------------------------------------------------- */
+/* Create / Save Request                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+
+* Payload sent to the backend when saving an artifact.
+  */
+  export interface SaveArtifactRequest {
   /**
-   * Research.id is an INTEGER.
-   *
-   * This must be sent as:
-   *
-   * {
-   *   "research_id": 73
-   * }
-   */
-  research_id: number;
 
-  destination: SaveDestination;
+  * Research identifier.
+* * The API client accepts both numeric and string/UUID identifiers.
+    */
+    research_id: string | number;
 
-  title: string;
+destination: SaveDestination;
 
-  description?: string | null;
+title: string;
+
+description?: string | null;
 }
 
-export interface SaveArtifactResponse {
+/* -------------------------------------------------------------------------- */
+/* API Response                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+
+* Response returned by POST /api/saved-artifacts.
+*
+* The backend may currently return either:
+*
+* 1. A wrapped response:
+*
+* {
+* ```
+   "success": true,
+  ```
+* ```
+   "artifact": { ... }
+  ```
+* }
+*
+* 2. The SavedArtifact directly:
+*
+* {
+* ```
+   "id": "...",
+  ```
+* ```
+   "research_id": 73,
+  ```
+* ```
+   ...
+  ```
+* }
+*
+* The API layer normalizes either form before exposing the result to the
+* application.
+  */
+  export interface SaveArtifactResponse {
   success?: boolean;
 
-  artifact?: SavedArtifact;
+artifact?: SavedArtifact;
 
-  /**
-   * The backend currently returns SavedArtifactResponse
-   * directly from POST /api/saved-artifacts.
-   *
-   * Keeping the response flexible allows the frontend to
-   * support that current API shape.
-   */
+/**
+
+* Direct SavedArtifact response fields.
+  */
   id?: string;
-  research_id?: number;
-  destination?: SaveDestination;
-  title?: string;
-  description?: string | null;
-  created_at?: string;
-  updated_at?: string | null;
+
+research_id?: string | number;
+
+destination?: SaveDestination;
+
+title?: string;
+
+description?: string | null;
+
+created_at?: string;
+
+updated_at?: string | null;
 }
