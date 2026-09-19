@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     # CORS
     # =========================================================
 
-    FRONTEND_URL: str = "http://localhost:3000"
+    FRONTEND_URLS: str = "http://localhost:3000"
 
     # =========================================================
     # Pydantic Settings
