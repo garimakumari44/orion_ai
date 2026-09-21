@@ -26,6 +26,15 @@ Watch the complete Orion AI workflow:
 
 </p>
 
+
+<img src="docs/img/orion_vid.gif" alt="Orion AI Demo" width="100%">
+
+## 🌐 Live Demo
+
+**[Open Orion AI →](https://orion-ai-henna.vercel.app/login)**
+
+Experience the live multi-agent equity research workflow.
+
 The demo walks through the research workflow from the initial research request through planning, multi-agent execution, evidence collection, synthesis, validation, and the final research workspace.
 
 ```text
