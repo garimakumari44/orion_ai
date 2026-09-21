@@ -1,7 +1,29 @@
-"""
+﻿"""
 app/agents/company/agent.py
 
 Company Research Agent.
+
+Responsibilities
+----------------
+- Consume the canonical AgentContext.
+- Resolve company research through the canonical company research service.
+- Preserve canonical company identity.
+- Perform deterministic company analysis.
+- Perform LLM-based company analysis.
+- Store company-specific outputs in AgentContext.
+- Return a normalized AgentResult.
+
+Concurrency notes
+-----------------
+This agent is designed to run as part of a scheduler stage.
+
+The canonical AgentContext MUST NOT be replaced or cloned.
+
+Task identity is snapshotted at the beginning of run() so the agent does
+not repeatedly read mutable task-local fields from the shared context.
+
+The runtime/execution layer is responsible for isolating task-local
+execution state when multiple agents execute concurrently.
 """
 
 from __future__ import annotations
@@ -25,6 +47,17 @@ logger = logging.getLogger(__name__)
 
 
 class CompanyAgent(BaseAgent):
+    """
+    Company Research Agent.
+
+    Performs deep company research and produces:
+        - enriched company data
+        - deterministic company analysis
+        - LLM-generated research analysis
+
+    AgentManager creates a fresh CompanyAgent instance per task, while
+    AgentServices remains the canonical shared service container.
+    """
 
     agent_id = "company"
 
@@ -56,27 +89,60 @@ class CompanyAgent(BaseAgent):
             services=services,
         )
 
+        # CompanyAnalyzer is local to this agent instance.
+        # AgentManager creates a new agent instance per task.
         self.analyzer = CompanyAnalyzer()
 
     async def run(
         self,
         context: AgentContext,
     ) -> AgentResult:
+        """
+        Execute company research.
+
+        The canonical AgentContext is consumed directly and is never
+        reconstructed or replaced.
+
+        Task-local identity is captured once at the beginning of execution.
+        This is important because the runtime may eventually execute
+        independent scheduler-stage tasks concurrently.
+        """
+
+        # ---------------------------------------------------------
+        # Task-local snapshots
+        # ---------------------------------------------------------
+        #
+        # Capture task identity immediately.
+
+        task_id: Any = None
+        task_type: Any = None
+        assigned_executor: Any = None
 
         try:
-
-            # =================================================
+            # =====================================================
             # 1. Validate context
-            # =================================================
+            # =====================================================
 
             if context is None:
                 raise ValueError(
                     "AgentContext is required for CompanyAgent"
                 )
 
-            # =================================================
-            # 2. Canonical identity
-            # =================================================
+            # =====================================================
+            # 2. Snapshot task identity
+            # =====================================================
+            #
+            # These values are potentially task-local runtime state.
+            # Snapshot them once rather than repeatedly reading the
+            # mutable shared context.
+
+            task_id = context.task_id
+            task_type = context.task_type
+            assigned_executor = context.assigned_executor
+
+            # =====================================================
+            # 3. Canonical research identity
+            # =====================================================
 
             research_id = context.research_id
 
@@ -88,21 +154,9 @@ class CompanyAgent(BaseAgent):
 
             industry = context.industry
 
-            # =================================================
-            # 3. Task identity
-            # =================================================
-
-            task_id = context.task_id
-
-            task_type = context.task_type
-
-            assigned_executor = (
-                context.assigned_executor
-            )
-
-            # =================================================
+            # =====================================================
             # 4. Research metadata
-            # =================================================
+            # =====================================================
 
             query = context.get_query()
 
@@ -110,40 +164,31 @@ class CompanyAgent(BaseAgent):
 
             research_type = context.get_research_type()
 
-            # =================================================
+            # =====================================================
             # 5. Request-scoped repository
-            # =================================================
+            # =====================================================
             #
-            # This is intentionally NOT obtained from
-            # context.metadata.
+            # The repository is injected into the canonical context
+            # by ResearchService.
             #
-            # It is the actual request-scoped repository
-            # injected by ResearchService.
-            # =================================================
+            # It must NOT be obtained from context.metadata.
 
-            repository = (
-                context.require_company_repository()
-            )
+            repository = context.require_company_repository()
 
-            # =================================================
-            # 6. Shared services
-            # =================================================
+            # =====================================================
+            # 6. Canonical shared services
+            # =====================================================
 
             services = context.require_services()
 
-            # =================================================
+            # =====================================================
             # 7. Supplemental metadata
-            # =================================================
+            # =====================================================
 
             metadata: dict[str, Any] = {}
 
-            if isinstance(
-                context.metadata,
-                dict,
-            ):
-                metadata = dict(
-                    context.metadata
-                )
+            if isinstance(context.metadata, dict):
+                metadata = dict(context.metadata)
 
             logger.info(
                 "COMPANY AGENT START | "
@@ -171,18 +216,18 @@ class CompanyAgent(BaseAgent):
                 industry,
             )
 
-            # =================================================
+            # =====================================================
             # 8. Validate research identity
-            # =================================================
+            # =====================================================
 
             if research_id is None:
                 raise ValueError(
                     "research_id missing from AgentContext"
                 )
 
-            # =================================================
+            # =====================================================
             # 9. Validate company identity
-            # =================================================
+            # =====================================================
 
             if company_id is None:
                 raise ValueError(
@@ -199,37 +244,27 @@ class CompanyAgent(BaseAgent):
                     f"ticker={ticker!r}"
                 )
 
-            # =================================================
-            # 10. Seed company data
-            # =================================================
+            # =====================================================
+            # 10. Build seed company data
+            # =====================================================
 
             seed_company_data: dict[str, Any] = {
                 "research_id": research_id,
-
                 "company_id": company_id,
-
                 "company": company,
-
                 "company_name": company,
-
                 "ticker": ticker,
-
                 "industry": industry,
-
                 "query": query,
-
                 "user_query": query,
-
                 "intent": intent,
-
                 "research_type": research_type,
-
                 "metadata": metadata,
             }
 
-            # =================================================
+            # =====================================================
             # 11. Resolve company research service
-            # =================================================
+            # =====================================================
 
             research_service = getattr(
                 services,
@@ -244,12 +279,12 @@ class CompanyAgent(BaseAgent):
                     "services.company_research."
                 )
 
-            # =================================================
+            # =====================================================
             # 12. Company enrichment
-            # =================================================
+            # =====================================================
 
             logger.info(
-                "COMPANY AGENT → COMPANY RESEARCH SERVICE | "
+                "COMPANY AGENT â†’ COMPANY RESEARCH SERVICE | "
                 "research_id=%r | "
                 "company_id=%r | "
                 "company=%r | "
@@ -269,9 +304,9 @@ class CompanyAgent(BaseAgent):
                 )
             )
 
-            # =================================================
-            # 13. Validate response
-            # =================================================
+            # =====================================================
+            # 13. Validate service response
+            # =====================================================
 
             if not isinstance(
                 enriched_company_data,
@@ -284,9 +319,12 @@ class CompanyAgent(BaseAgent):
                     f"{type(enriched_company_data).__name__}"
                 )
 
-            # =================================================
+            # =====================================================
             # 14. Preserve canonical identity
-            # =================================================
+            # =====================================================
+            #
+            # The research service may enrich the company data, but
+            # canonical identity always comes from AgentContext.
 
             enriched_company_data = {
                 **enriched_company_data,
@@ -314,9 +352,9 @@ class CompanyAgent(BaseAgent):
                 "metadata": metadata,
             }
 
-            # =================================================
+            # =====================================================
             # 15. Validate canonical identity
-            # =================================================
+            # =====================================================
 
             if enriched_company_data.get(
                 "research_id"
@@ -335,9 +373,7 @@ class CompanyAgent(BaseAgent):
                 )
 
             if company and (
-                enriched_company_data.get(
-                    "company"
-                )
+                enriched_company_data.get("company")
                 != company
             ):
                 raise RuntimeError(
@@ -346,9 +382,7 @@ class CompanyAgent(BaseAgent):
                 )
 
             if ticker and (
-                enriched_company_data.get(
-                    "ticker"
-                )
+                enriched_company_data.get("ticker")
                 != ticker
             ):
                 raise RuntimeError(
@@ -356,9 +390,15 @@ class CompanyAgent(BaseAgent):
                     "ticker identity"
                 )
 
-            # =================================================
-            # 16. Store enrichment in context
-            # =================================================
+            # =====================================================
+            # 16. Store company enrichment
+            # =====================================================
+            #
+            # These are company-agent-owned output keys.
+            #
+            # The concurrency runtime must ensure that multiple agents
+            # executing in parallel do not mutate the same task-local
+            # runtime fields.
 
             context.set_data(
                 "company",
@@ -370,9 +410,9 @@ class CompanyAgent(BaseAgent):
                 enriched_company_data,
             )
 
-            # =================================================
-            # 17. Deterministic analysis
-            # =================================================
+            # =====================================================
+            # 17. Deterministic company analysis
+            # =====================================================
 
             deterministic_analysis = (
                 self.analyzer.analyze(
@@ -385,9 +425,9 @@ class CompanyAgent(BaseAgent):
                 deterministic_analysis,
             )
 
-            # =================================================
+            # =====================================================
             # 18. Build LLM prompt
-            # =================================================
+            # =====================================================
 
             llm_prompt = COMPANY_ANALYSIS_PROMPT.format(
                 company_name=(
@@ -401,25 +441,25 @@ class CompanyAgent(BaseAgent):
                 ),
             )
 
-            # =================================================
+            # =====================================================
             # 19. LLM analysis
-            # =================================================
+            # =====================================================
 
-            llm_analysis = services.llm.generate(
-                prompt=llm_prompt,
-                system_prompt=(
-                    COMPANY_RESEARCH_SYSTEM_PROMPT
-                ),
+            llm_messages = [
+                {
+                    "role": "system",
+                    "content": COMPANY_RESEARCH_SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": llm_prompt,
+                },
+            ]
+
+            llm_analysis = services.llm.chat(
+                messages=llm_messages,
+                task="chat",
             )
-
-            context.set_data(
-                "company_llm_analysis",
-                llm_analysis,
-            )
-
-            # =================================================
-            # 20. Final result
-            # =================================================
 
             result = {
                 "company_data": seed_company_data,
@@ -473,18 +513,20 @@ class CompanyAgent(BaseAgent):
 
             logger.exception(
                 "COMPANY AGENT FAILED | "
+                "task_id=%r | "
+                "task_type=%r | "
+                "assigned_executor=%r | "
                 "exception_type=%s | "
                 "exception=%s",
+                task_id,
+                task_type,
+                assigned_executor,
                 type(exc).__name__,
                 str(exc),
             )
 
             return AgentResult.failure(
                 agent_name=self.agent_id,
-                task_id=(
-                    context.task_id
-                    if context is not None
-                    else None
-                ),
+                task_id=task_id,
                 error=str(exc),
             )

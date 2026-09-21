@@ -7,12 +7,25 @@ Investment Committee Agent
 Synthesizes research produced by the other agents and produces
 an investment-level decision.
 
-The agent implements only the domain-specific ``run(context)``
-method required by BaseAgent.
+Concurrency Model
+-----------------
+This agent is designed to be safe for stage-level concurrent
+execution within the canonical research AgentContext.
+
+Rules:
+- Never create or reconstruct an AgentContext.
+- Never mutate shared context state during analysis.
+- Snapshot task identity before domain processing.
+- Snapshot upstream AgentResults before synthesis.
+- Build all intermediate structures locally.
+- Return the final AgentResult without mutating context.data,
+  context.agent_results, context.evidence, or context.citations.
+
+The canonical AgentContext remains owned by the execution pipeline.
 
 Generic execution lifecycle, validation, error handling,
-observability, result normalization, and cleanup are owned by
-BaseAgent.
+observability, result normalization, and cleanup are owned
+by BaseAgent.
 """
 
 from __future__ import annotations
@@ -21,10 +34,7 @@ import logging
 from typing import Any, Dict
 
 from app.agents.base.agent_context import AgentContext
-from app.agents.base.agent_result import (
-    AgentResult,
-    AgentStatus,
-)
+from app.agents.base.agent_result import AgentResult
 from app.agents.base.base_agent import BaseAgent
 
 
@@ -45,11 +55,13 @@ class InvestmentCommitteeAgent(BaseAgent):
     - Consider critic/quality-control results.
     - Produce the final investment-level decision.
 
+    Concurrency
+    -----------
+    The agent performs domain processing against local snapshots
+    of upstream results and does not mutate the canonical
+    AgentContext.
+
     BaseAgent owns the generic execution lifecycle.
-
-    This class therefore implements only:
-
-        async def run(context) -> AgentResult
     """
 
     # =========================================================
@@ -93,18 +105,78 @@ class InvestmentCommitteeAgent(BaseAgent):
 
         BaseAgent.execute() owns the generic execution lifecycle.
 
+        Concurrency Notes
+        -----------------
+        The canonical AgentContext is shared by the execution
+        pipeline. Therefore task-local values are snapshotted
+        before any potentially long-running work begins.
+
+        The agent does not mutate the canonical context during
+        synthesis.
+
         IMPORTANT
         ---------
-        The current LLMService.generate() implementation is
-        synchronous and returns a string. Therefore it MUST NOT
-        be awaited here.
+        LLMService provides a native asynchronous
+        ``generate_async()`` API. Because Investment Committee
+        execution runs inside the asynchronous ExecutionEngine,
+        the async API is used here so concurrent stage tasks do
+        not block the event loop.
+
+        Model fallback inside a single LLM request remains
+        sequential and is owned by LLMService.
         """
 
-        agent_results = context.agent_results
+        # -----------------------------------------------------
+        # Snapshot task identity immediately
+        # -----------------------------------------------------
+        #
+        # Worker / AgentManager / BaseAgent expose task identity
+        # through the canonical AgentContext. The underlying
+        # runtime identity is task-local via ContextVar.
+        #
+        # Snapshotting here prevents this agent from rereading
+        # task_id after long-running synthesis work.
+        #
+
+        task_id = context.task_id
+        research_id = context.research_id
+
+        # -----------------------------------------------------
+        # Snapshot upstream results
+        # -----------------------------------------------------
+        #
+        # Do not retain a mutable view of the canonical mapping
+        # while constructing the committee research context.
+        #
+        # The AgentResult objects themselves are treated as
+        # read-only domain results.
+        #
+
+        agent_results = dict(
+            context.agent_results or {}
+        )
+
+        logger.debug(
+            "Investment Committee starting | "
+            "research_id=%s task_id=%s context_id=%s "
+            "upstream_agents=%s",
+            research_id,
+            task_id,
+            id(context),
+            list(agent_results.keys()),
+        )
+
+        # -----------------------------------------------------
+        # Build local research representation
+        # -----------------------------------------------------
 
         research = self._build_research_context(
             agent_results
         )
+
+        # -----------------------------------------------------
+        # Build synthesis prompt
+        # -----------------------------------------------------
 
         prompt = self._build_prompt(
             context=context,
@@ -112,82 +184,133 @@ class InvestmentCommitteeAgent(BaseAgent):
         )
 
         # -----------------------------------------------------
-        # LLM
+        # Async LLM
         # -----------------------------------------------------
-        # LLMService.generate() currently returns a normal
-        # Python value, typically a string.
         #
-        # Therefore:
+        # Use the native async LLM API so this agent does not
+        # block the event loop while other asynchronous tasks
+        # are running concurrently.
         #
-        #     response = llm.generate(...)
+        # LLMService keeps model fallback sequential within
+        # this individual request.
         #
-        # NOT:
-        #
-        #     response = await llm.generate(...)
-        # -----------------------------------------------------
 
         llm = self.services.llm
 
-        response = llm.generate(
-            prompt=prompt,
+        response = llm.chat(
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            task="chat",
         )
+
+        # -----------------------------------------------------
+        # Parse decision locally
+        # -----------------------------------------------------
 
         decision = self._parse_decision(
             response
         )
 
-        return AgentResult.success(
+        # -----------------------------------------------------
+        # Collect evidence/citations locally
+        # -----------------------------------------------------
+        #
+        # These methods only read the snapshot and return new
+        # lists. They do not mutate canonical context state.
+        #
+
+        evidence = self._collect_evidence(
+            agent_results
+        )
+
+        citations = self._collect_citations(
+            agent_results
+        )
+
+        confidence = self._normalize_confidence(
+            decision.get(
+                "confidence",
+                0.0,
+            )
+        )
+
+        # -----------------------------------------------------
+        # Build metadata locally
+        # -----------------------------------------------------
+
+        metadata = {
+            "reviewed_agents": list(
+                agent_results.keys()
+            ),
+            "decision": decision.get(
+                "decision",
+                "",
+            ),
+            "key_reasons": decision.get(
+                "key_reasons",
+                [],
+            ),
+            "major_risks": decision.get(
+                "major_risks",
+                [],
+            ),
+            "catalysts": decision.get(
+                "catalysts",
+                [],
+            ),
+            "valuation_view": decision.get(
+                "valuation_view",
+                "",
+            ),
+        }
+
+        # -----------------------------------------------------
+        # Return result
+        # -----------------------------------------------------
+        #
+        # Explicitly use the task_id snapshot instead of
+        # rereading context.task_id after LLM processing.
+        #
+
+        result = AgentResult.success(
             agent_name=self.agent_id,
             task_id=str(
-                context.task_id or ""
+                task_id or ""
             ),
             data=decision,
             findings=decision.get(
                 "findings",
                 [],
             ),
-            evidence=self._collect_evidence(
-                agent_results
-            ),
-            citations=self._collect_citations(
-                agent_results
-            ),
-            confidence=self._normalize_confidence(
-                decision.get(
-                    "confidence",
-                    0.0,
-                )
-            ),
+            evidence=evidence,
+            citations=citations,
+            confidence=confidence,
             reasoning=decision.get(
                 "thesis",
                 "",
             ),
-            metadata={
-                "reviewed_agents": list(
-                    agent_results.keys()
-                ),
-                "decision": decision.get(
-                    "decision",
-                    "",
-                ),
-                "key_reasons": decision.get(
-                    "key_reasons",
-                    [],
-                ),
-                "major_risks": decision.get(
-                    "major_risks",
-                    [],
-                ),
-                "catalysts": decision.get(
-                    "catalysts",
-                    [],
-                ),
-                "valuation_view": decision.get(
-                    "valuation_view",
-                    "",
-                ),
-            },
+            metadata=metadata,
         )
+
+        logger.debug(
+            "Investment Committee completed | "
+            "research_id=%s task_id=%s context_id=%s "
+            "decision=%s confidence=%s",
+            research_id,
+            task_id,
+            id(context),
+            decision.get(
+                "decision",
+                "",
+            ),
+            confidence,
+        )
+
+        return result
 
     # =========================================================
     # Research Context
@@ -203,17 +326,28 @@ class InvestmentCommitteeAgent(BaseAgent):
 
         The Investment Committee result itself is excluded
         to prevent recursive self-reference.
+
+        This method constructs a new top-level dictionary and
+        does not mutate the supplied AgentResults.
         """
 
         research: Dict[str, Any] = {}
 
         for agent_name, result in agent_results.items():
 
+            # -------------------------------------------------
+            # Prevent recursive self-reference
+            # -------------------------------------------------
+
             if agent_name in {
                 self.agent_id,
                 self.name,
             }:
                 continue
+
+            # -------------------------------------------------
+            # Build local representation
+            # -------------------------------------------------
 
             research[agent_name] = {
                 "data": getattr(
@@ -271,6 +405,9 @@ class InvestmentCommitteeAgent(BaseAgent):
     ) -> str:
         """
         Build the Investment Committee synthesis prompt.
+
+        Context is read-only here. No shared context mutation
+        occurs during prompt construction.
         """
 
         company = getattr(
@@ -360,13 +497,17 @@ or evidence that are not present in the supplied research.
 
         Supports dictionary responses and falls back to a
         conservative free-form representation for string responses.
+
+        All returned structures are newly constructed locally.
         """
 
         if isinstance(
             response,
             dict,
         ):
-            decision = dict(response)
+            decision = dict(
+                response
+            )
 
             decision.setdefault(
                 "decision",
@@ -452,7 +593,7 @@ or evidence that are not present in the supplied research.
             min(
                 1.0,
                 confidence,
-            )
+            ),
         )
 
     # =========================================================
@@ -465,6 +606,10 @@ or evidence that are not present in the supplied research.
     ) -> list[Any]:
         """
         Collect evidence from upstream agents.
+
+        Returns a new local list.
+
+        The canonical AgentContext is never mutated.
         """
 
         evidence: list[Any] = []
@@ -504,6 +649,10 @@ or evidence that are not present in the supplied research.
     ) -> list[Any]:
         """
         Collect citations from upstream agents.
+
+        Returns a new local list.
+
+        The canonical AgentContext is never mutated.
         """
 
         citations: list[Any] = []
