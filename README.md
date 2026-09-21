@@ -18,12 +18,10 @@
 
 ## 🎥 Full Demo
 
-Watch the complete Orion AI workflow:
-
 <p align="center">
-
-**▶️ [Watch the Full Orion AI Demo on YouTube](YOUR_YOUTUBE_VIDEO_URL)**
-
+  <a href="https://youtu.be/b-b2Kd7DPwA">
+    ▶️ <strong>Watch the Full Orion AI Demo on YouTube</strong>
+  </a>
 </p>
 
 
