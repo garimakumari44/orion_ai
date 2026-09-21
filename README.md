@@ -65,7 +65,7 @@ Research Workspace
 Report / Library
 ```
 
-> Replace `YOUR_YOUTUBE_VIDEO_URL` with the actual YouTube demo URL.
+
 
 ---
 
@@ -1085,43 +1085,8 @@ The repository contains additional architecture diagrams covering the major Orio
 | [`new_research.png`](docs/img/new_research.png)             | New research workflow                |
 | [`orion_vid.gif`](docs/img/orion_vid.gif)                   | Orion AI product demonstration       |
 
----
 
-# 🎥 Demo
 
-The demo illustrates the Orion research workflow from the user-facing research experience through the resulting research workspace.
-
-```text
-User
- ↓
-New Research
- ↓
-Research Configuration
- ↓
-Adaptive Planning
- ↓
-Execution
- ↓
-AI Analyst Team
- ↓
-Knowledge / Retrieval / Tools
- ↓
-Evidence
- ↓
-Investment Committee
- ↓
-Critic
- ↓
-Research Workspace
- ↓
-Reports / Library
-```
-
-For the complete interactive walkthrough:
-
-**[▶️ Watch the Full Orion AI Demo](YOUR_YOUTUBE_VIDEO_URL)**
-
----
 
 # 🔭 Architecture Philosophy
 
